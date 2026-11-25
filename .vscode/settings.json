@@ -1,0 +1,27 @@
+{
+  "git.enabled": true,
+  "git.autofetch": true,
+  "git.ignoreLimitWarning": true,
+  "git.confirmSync": false,
+  "scm.diffDecorationsGutterVisibility": "always",
+  "files.watcherExclude": {
+    "**/.lake/**": true,
+    "**/node_modules/**": true
+  },
+  "search.exclude": {
+    "**/.lake": true,
+    "**/vsix": true
+  },
+  "files.associations": {
+    "lean-toolchain": "plaintext",
+    "*.lean": "lean4"
+  },
+  "[lean4]": {
+    "editor.tabSize": 2,
+    "editor.formatOnSave": false,
+    "editor.wordBasedSuggestions": "off"
+  },
+  "lean4.input.enabled": true,
+  "lean4.infoview.displayMode": "alwaysRight",
+  "extensions.supportNpmScripts": true
+}

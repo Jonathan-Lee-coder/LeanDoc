@@ -1,0 +1,16 @@
+# Lake 构建产物与依赖（可达数 GB，绝对不要提交）
+/.lake/
+*.olean
+*.trace
+lean-artifacts/
+
+# 本地临时
+*.json.err
+/setup-tmp/
+
+# 临时草稿与日志（论文全文抽取、构建/审计日志、探针文件）
+.paper.txt
+_paper*.txt
+_*.log
+_*.tmp
+DLMST/_Probe.lean

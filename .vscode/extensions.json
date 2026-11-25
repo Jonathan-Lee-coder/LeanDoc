@@ -1,0 +1,6 @@
+{
+  "recommendations": [
+    "leanprover.lean4",
+    "mhutchie.git-graph"
+  ]
+}
