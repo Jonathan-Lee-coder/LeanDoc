@@ -122,6 +122,19 @@ theorem IsMSFOf.lightest_bridge {S T : Finset E} (hT : IsMSFOf G S T) {f e : E} 
   rw [wsum_exchange hf (not_mem_of_not_conn hsep)] at hge
   linarith
 
+/-- **The exchange, relative to `S`, preserves optimality.**  Replacing the tree edge `f` by an
+edge `e ∈ S` that is no heavier and that `T - f` does not reconnect keeps the minimum spanning
+forest property of `G[S]`.  This is PR02's exchange at the level of an instance. -/
+theorem IsMSFOf.exchange {S T : Finset E} (hT : IsMSFOf G S T) {f e : E} (hf : f ∈ T)
+    (he : e ∈ S) (hsep : ¬ Conn G (T.erase f) (G.src e) (G.dst e)) (hw : G.weight e ≤ G.weight f) :
+    IsMSFOf G S (insert e (T.erase f)) := by
+  refine ⟨isSpanningForestOf_exchange hT.1 hf he hsep, fun T' hT' => ?_⟩
+  have h1 : wsum G T ≤ wsum G T' := hT.2 T' hT'
+  have h2 : wsum G (insert e (T.erase f)) ≤ wsum G T := by
+    rw [wsum_exchange hf (not_mem_of_not_conn hsep)]
+    linarith
+  exact le_trans h2 h1
+
 /-- A trail whose ends lie on opposite sides of a cut has an edge crossing it, in either direction. -/
 private theorem crossing_compl {u v : V} {es : List E} (p : Path G u es v) (S : Set V)
     (hu : u ∉ S) (hv : v ∈ S) :

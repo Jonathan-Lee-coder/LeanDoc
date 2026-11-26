@@ -250,6 +250,65 @@ theorem card_le_card_sub_one_of_isForest {F : Finset E} (hF : IsForest G F)
     Finset.card_pos.mpr ⟨_, Finset.mem_image.mpr ⟨v, Finset.mem_univ v, rfl⟩⟩
   omega
 
+/-- **A forest whose edges live on a vertex set `P` has at most `|P|` edges.**  A vertex outside `P`
+is an end of no edge of `F`, so it is isolated in the subgraph and `compCount ≥ |V \ P|`; the
+component identity then gives `|F| = |V| − compCount ≤ |V| − |V \ P| = |P|`.  This is the `hFcard`
+field of a certificate call: the instance's edges all have ends inside its portal set `P`. -/
+theorem card_le_card_of_isForest_of_ends {F : Finset E} {P : Finset V} (hF : IsForest G F)
+    (hP : ∀ e ∈ F, G.src e ∈ P ∧ G.dst e ∈ P) : F.card ≤ P.card := by
+  classical
+  have hcomp : ∀ v : V, v ∉ P → comp G F v = {v} := by
+    intro v hv
+    have key : ∀ {x : V} {es : List E}, Path G v es x → (∀ e ∈ es, e ∈ F) → x = v := by
+      intro x es p hmem
+      induction p with
+      | nil u => rfl
+      | fwd e hs _ _ _ =>
+          exact absurd (hP e (hmem e (by simp))).1 (by rw [hs]; exact hv)
+      | bwd e hd _ _ _ =>
+          exact absurd (hP e (hmem e (by simp))).2 (by rw [hd]; exact hv)
+    ext x
+    rw [mem_comp, Finset.mem_singleton]
+    exact ⟨fun h => by
+      obtain ⟨es, p, hmem⟩ := path_of_conn h
+      exact key p hmem,
+      fun hx => by rw [hx]; exact Conn.refl v⟩
+  have himg : (Finset.univ \ P).image (fun v : V => ({v} : Finset V)) ⊆
+      Finset.univ.image (comp G F) := by
+    intro s hs
+    obtain ⟨v, hv, rfl⟩ := Finset.mem_image.mp hs
+    exact Finset.mem_image.mpr
+      ⟨v, Finset.mem_univ v, (hcomp v (Finset.mem_sdiff.mp hv).2).symm ▸ rfl⟩
+  have hinj : ((Finset.univ \ P).image (fun v : V => ({v} : Finset V))).card =
+      (Finset.univ \ P).card :=
+    Finset.card_image_of_injective _
+      (fun a b h => by simpa using congrArg (fun s : Finset V => a ∈ s) h)
+  have hle : (Finset.univ \ P).card ≤ compCount G F := by
+    rw [compCount, ← hinj]
+    exact Finset.card_le_card himg
+  have hid := card_add_compCount (G := G) hF
+  have hsplit : (Finset.univ \ P).card + P.card = Fintype.card V := by
+    have h := Finset.card_sdiff_add_card_inter (s := (Finset.univ : Finset V)) (t := P)
+    rwa [Finset.univ_inter, Finset.card_univ] at h
+  omega
+
+/-- **Vertices that are all edge ends number at most twice the edges.**  Each `v ∈ P` picks an edge
+of `E₀` incident to it, so `P` sits inside the union of the `2|E₀|` endpoints.  This is the
+instance-level form of the paper's `n ≤ 2m` (with isolated vertices already removed). -/
+theorem card_le_two_mul_card_of_subset_ends {P : Finset V} {E₀ : Finset E}
+    (h : ∀ v ∈ P, ∃ e ∈ E₀, G.src e = v ∨ G.dst e = v) : P.card ≤ 2 * E₀.card := by
+  classical
+  have hsub : P ⊆ E₀.biUnion (fun e => ({G.src e, G.dst e} : Finset V)) := by
+    intro v hv
+    obtain ⟨e, he, hv'⟩ := h v hv
+    exact Finset.mem_biUnion.mpr ⟨e, he, by rcases hv' with rfl | rfl <;> simp⟩
+  calc P.card ≤ (E₀.biUnion (fun e => ({G.src e, G.dst e} : Finset V))).card :=
+        Finset.card_le_card hsub
+    _ ≤ ∑ e ∈ E₀, ({G.src e, G.dst e} : Finset V).card := Finset.card_biUnion_le
+    _ ≤ ∑ _e ∈ E₀, 2 :=
+        Finset.sum_le_sum (fun e _ => (Finset.card_insert_le _ _).trans (by simp))
+    _ = 2 * E₀.card := by rw [Finset.sum_const, smul_eq_mul, Nat.mul_comm]
+
 /-- **A Kruskal-order criterion for forestness.**  If every edge of `F` has its ends unjoined by
 those edges of `F` that are smaller in a fixed order, then `F` is a forest: inserting the edges in
 increasing order, each insertion closes no cycle.  This is the invariant the certificate procedure's

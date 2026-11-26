@@ -649,4 +649,34 @@ theorem boruvkaRun_le_one_add (hconn : ∀ u v : V, Conn G Finset.univ u v) (k :
       (((compCount G (boruvkaRun G 0) - 1) / 2 ^ k : ℕ) : ℝ) := by exact_mod_cast hsub
   linarith
 
+/-- **Instance activation, edge form.**  If `E₀` joins `v` to a vertex outside its own
+`F`-component, then some edge of `E₀` leaves that component: the crossing of the `F`-component cut,
+with the edge lying in the connection's own edge set. -/
+theorem leaves_of_conn_E₀ {E₀ F : Finset E} {v : V}
+    (h : ∃ x, Conn G E₀ v x ∧ ¬ Conn G F v x) : ∃ e ∈ E₀, leaves G F v e := by
+  obtain ⟨x, hx, hnx⟩ := h
+  obtain ⟨e, he, hcr⟩ :=
+    crossing_of_conn hx (↑(comp G F v) : Set V)
+      (by simpa using comp_self_mem (G := G) (F := F) (v := v))
+      (by simpa using fun hc => hnx (mem_comp.mp hc))
+  refine ⟨e, he, ?_⟩
+  rcases hcr with ⟨hs, hd⟩ | ⟨hs, hd⟩
+  · exact Or.inl ⟨mem_comp.mp hs, fun hc => hd (mem_comp.mpr hc)⟩
+  · exact Or.inr ⟨fun hc => hs (mem_comp.mpr hc), mem_comp.mp hd⟩
+
+/-- **Activation from instance connectivity.**  If `E₀` connects the whole vertex set and the forest
+has at least two components, every vertex has an outgoing `E₀`-edge — the paper's "each component
+has an outgoing edge" condition, derived rather than assumed. -/
+theorem hact_of_conn_E₀ (K : ℕ) {P : Finset V} {E₀ : Finset E} (F : ℕ → Finset E)
+    (hconn : ∀ u w : V, Conn G E₀ u w)
+    (hc : ∀ i, i < K → 2 ≤ compCount G (F i)) :
+    ∀ i, i < K → ∀ v ∈ P, ∃ e ∈ E₀, leaves G (F i) v e := by
+  intro i hi v _
+  have hx : ∃ x, x ∉ comp G (F i) v := by
+    by_contra h
+    push Not at h
+    exact comp_ne_univ_of_two_le (G := G) (F := F i) (hc i hi) v (Finset.eq_univ_of_forall h)
+  obtain ⟨x, hx⟩ := hx
+  exact leaves_of_conn_E₀ ⟨x, hconn v x, fun hc' => hx (mem_comp.mpr hc')⟩
+
 end DLMST

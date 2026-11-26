@@ -58,9 +58,9 @@ theorem mem_selAt {B : Finset E} {adm : E → Prop} {k : ℕ} {v : V} {e : E} :
 /-- **Lemma 3.3's selection exists.**  Cutting the sorted representatives at `k` satisfies the whole
 `BatchSpec`: nothing outside the batch, quota respected, only representatives, a left-out
 representative means the quota is full, and kept edges are at most dropped ones. -/
-theorem exists_batchSpec (G : WGraph V E) (B : Finset E) (adm : E → Prop) (k : ℕ) :
-    ∃ sel : V → Finset E, BatchSpec G B adm k sel := by
-  refine ⟨selAt G B adm k, ?_, ?_, ?_, ?_, ?_⟩
+theorem batchSpec_selAt (G : WGraph V E) (B : Finset E) (adm : E → Prop) (k : ℕ) :
+    BatchSpec G B adm k (selAt G B adm k) := by
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
   · intro v e he
     have hfl : e ∈ sortReps G B adm v := List.mem_of_mem_take (mem_selAt.mp he)
     exact (mem_repsAt.mp (mem_sortReps.mp hfl)).1
@@ -131,6 +131,10 @@ theorem exists_batchSpec (G : WGraph V E) (B : Finset E) (adm : E → Prop) (k :
       sortReps_pairwise.rel_get_of_lt (show (⟨i, hi⟩ : Fin _) < ⟨j, hj⟩ from hij)
     rw [← hgeti, ← hgetj]
     exact le_of_lt hlt
+
+theorem exists_batchSpec (G : WGraph V E) (B : Finset E) (adm : E → Prop) (k : ℕ) :
+    ∃ sel : V → Finset E, BatchSpec G B adm k sel :=
+  ⟨selAt G B adm k, batchSpec_selAt G B adm k⟩
 
 /-- **The spoke update exists.**  Given the portal covering and a total incident "old" spoke map,
 choose at each full vertex the candidate `exists_cnd` supplies and keep the lighter of it and the old

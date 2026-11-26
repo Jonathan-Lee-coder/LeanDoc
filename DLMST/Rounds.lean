@@ -358,6 +358,21 @@ the algorithm used differs from the true preferred action there. -/
 def error (act : Fin t → Fin t → Pref) (est : Fin t × Fin t → Pref) (p : Fin t × Fin t) : Prop :=
   bad act p ∨ est p ≠ act p.1 p.2
 
+/-- **Splitting a disjunctive count.**  The elements satisfying `p ∨ q` are covered by the `p`-half and
+the `q`-half, so their number is at most the sum.  Applied to `error = bad ∨ mis-estimate` this is how
+§3.3's error count splits into the `≤ 2t` bad half (Lemma 3.11) and the `m/t` sampling half
+(Claim 3.12). -/
+theorem card_filter_or_le {α : Type*} (s : Finset α) (p q : α → Prop)
+    [DecidablePred p] [DecidablePred q] :
+    (s.filter fun a => p a ∨ q a).card ≤ (s.filter p).card + (s.filter q).card := by
+  classical
+  have hsub : s.filter (fun a => p a ∨ q a) ⊆ s.filter p ∪ s.filter q := by
+    intro a ha
+    obtain ⟨ham, hp | hq⟩ := Finset.mem_filter.mp ha
+    · exact Finset.mem_union_left _ (Finset.mem_filter.mpr ⟨ham, hp⟩)
+    · exact Finset.mem_union_right _ (Finset.mem_filter.mpr ⟨ham, hq⟩)
+  exact le_trans (Finset.card_le_card hsub) (Finset.card_union_le _ _)
+
 /-- **Lemma 3.7, the deepest level.**  The projection living at the last level prefers `find`, so the
 batch processes it and Lemma 3.2 gives either support already or `p(e) ≤ w(e)`.  In the second case the
 assigned round is a *good find* round, so a later block prefers `find` again; there either the portals
@@ -427,6 +442,22 @@ theorem lemma37_rejected_error {act : Fin t → Fin t → Pref} {est : Fin t × 
         omega)⟩)
   · exact Or.inr h
 
+/-- **Lemma 3.7's per-level contrapositive**, the form the error count consumes: a level whose
+returned forest does *not* support the tracked edge must have been assigned a bad round there, so an
+error has been paid at that slot whatever the estimate was.  (The positive direction is
+`lemma37_project_step`.) -/
+theorem lemma37_project_error {F₁ Fre : Finset E} {σ : V → E} {F : Fin t → Finset E}
+    {e : E} {b r : Fin t} (act : Fin t → Fin t → Pref) (est : Fin t × Fin t → Pref)
+    (hact : ∀ j, act b j = actOf G σ (F j) e)
+    (hpref : ¬ prefFind G σ (F r) e)
+    (hret : ∀ j : Fin t, (r.val + 1 : ℕ) ≤ j.val → Fre ⊆ F j)
+    (hsub : Fre ⊆ F₁)
+    (hconn : Conn G (belowLe G Fre (max (G.weight e) (pE G σ e))) (G.src e) (G.dst e))
+    (hnot : ¬ supported G F₁ e) :
+    error (act := act) est (b, r) :=
+  by_contra fun hno =>
+    hnot (lemma37_project_step act hact hpref (fun hb => hno (Or.inl hb)) hret hsub hconn)
+
 /-- **One level of the recursion as one edge sees it**: `e` is the projection of the tracked edge living
 at that level and `F` the forest the level returns. -/
 structure Lev (E : Type*) where
@@ -454,5 +485,31 @@ theorem lemma37 {lev : ℕ → Lev E} {d : ℕ}
         intro k hk
         exact hproject k (by omega) (ih (k + 1) (by omega))
   exact key d 0 (by omega)
+
+/-- **Lemma 3.7 in the error form the count consumes.**  Same backward induction as `lemma37`, but each
+project step is allowed to fail *and register an error* instead of concluding support.  Then either the
+root forest supports `e`, or some level `j < d` on `e`'s projection chain paid an error at its slot
+`(b, r)`.  This is the statement §3.5 counts over: an unsupported edge must buy a bad round or a wrong
+estimate somewhere. -/
+theorem lemma37_error {lev : ℕ → Lev E} {d : ℕ} {act : ℕ → Fin t → Fin t → Pref}
+    {est : ℕ → Fin t × Fin t → Pref} {slot : ℕ → Fin t × Fin t}
+    (hfind : ∀ j : ℕ, d ≤ j → Lev.supp G (lev j))
+    (hproject : ∀ j : ℕ, j < d → Lev.supp G (lev (j + 1)) →
+      Lev.supp G (lev j) ∨ error (act j) (est j) (slot j)) :
+    Lev.supp G (lev 0) ∨ ∃ j, j < d ∧ error (act j) (est j) (slot j) := by
+  by_cases h : ∃ j, j < d ∧ error (act j) (est j) (slot j)
+  · exact Or.inr h
+  · refine Or.inl ?_
+    push_neg at h
+    have key : ∀ n k : ℕ, k + n = d → Lev.supp G (lev k) := by
+      intro n
+      induction n with
+      | zero => intro k hk; exact hfind k (by omega)
+      | succ n ih =>
+        intro k hk
+        rcases hproject k (by omega) (ih (k + 1) (by omega)) with hs | he
+        · exact hs
+        · exact absurd he (h k (by omega))
+    exact key d 0 (by omega)
 
 end DLMST

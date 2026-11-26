@@ -40,7 +40,7 @@ set_option linter.unusedSectionVars false
 inductive Pref where
   | find
   | project
-  deriving DecidableEq
+  deriving DecidableEq, Fintype
 
 private theorem pref_ne : (Pref.find : Pref) ≠ Pref.project := by decide
 

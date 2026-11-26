@@ -135,6 +135,16 @@ noncomputable def lost (H : History V E t) (ρ : Sched E t) : ℕ :=
 theorem lost_def (H : History V E t) (ρ : Sched E t) :
     H.lost ρ = ((Finset.univ : Finset E).filter fun e => H.badFor e (ρ e)).card := rfl
 
+/-- **`|U(F)| ≤ lost`.**  If every edge that `F` leaves unsupported has its assigned round bad for it —
+Lemma 3.7's conclusion compiled against one fixed schedule — then the retained set of an instance is no
+larger than the history's lost count.  This is where §3.3's `U(F)` meets §3.5's `lost`. -/
+theorem card_unsupp_le_lost {F : Finset E} (H : History V E t) (ρ : Sched E t)
+    (h : ∀ e : E, ¬ supported G F e → H.badFor e (ρ e)) :
+    (unsupp G F).card ≤ H.lost ρ := by
+  rw [lost_def]
+  exact Finset.card_le_card (fun e he =>
+    Finset.mem_filter.mpr ⟨Finset.mem_univ _, h e (mem_unsupp.mp he)⟩)
+
 /-- **The per-edge factor** of Lemma 3.11's generating function.  Over all `t²` rounds, the weighted
 number `∑_r 2^{[r bad for e]}` is `t² + (#bad rounds) ≤ t² + 2t`: this is where Definition 3.4's
 count — the paper's `Pr[Y_e = 1] ≤ 2/t` — is consumed. -/

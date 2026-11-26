@@ -273,6 +273,19 @@ theorem claim_3_13 {n m : ℕ} {γ : ℝ} (_hγ : 0 ≤ γ) {D : ℕ} {nL mL : �
         positivity
     _ = γ ^ 2 * 40000 * Real.sqrt ((m : ℝ) * (n : ℝ)) := by ring
 
+/-- **Claim 3.13 with a coefficient.**  Multiplying the per-level error term by a constant `K ≥ 0`
+multiplies the geometric bound: this is where the paper's hidden `O(1)` in `O(t²√(m_cn_c))` lives
+(`Section36.error_count_le` shows the true constant is `10`). -/
+theorem claim_3_13_coef {n m : ℕ} {γ K : ℝ} (hγ : 0 ≤ γ) (hK : 0 ≤ K) {D : ℕ}
+    {nL mL : ℕ → ℕ}
+    (hn : ∀ i ∈ Finset.range D, (nL i : ℝ) * 4 ^ i ≤ (n : ℝ))
+    (hm : ∀ i ∈ Finset.range D, (mL i : ℝ) ≤ (m : ℝ)) :
+    (∑ i ∈ Finset.range D,
+        K * ((γ * ((i : ℝ) + 1) ^ 3) ^ 2 * Real.sqrt ((mL i : ℝ) * (nL i : ℝ))))
+      ≤ K * (γ ^ 2 * 40000 * Real.sqrt ((m : ℝ) * (n : ℝ))) := by
+  rw [← Finset.mul_sum]
+  exact mul_le_mul_of_nonneg_left (claim_3_13 hγ hn hm) hK
+
 /-- **The error account of §3.6.**  Each level's errors and the edges it hands to child MSF calls
 cost `O(t²√(m_c n_c)) + 4m_c/t_c`; summed over the levels this is
 `γ²·40000·√(mn) + 16m/γ`.  (The paper's `4+4` split between errors and child inputs.) -/
@@ -354,6 +367,111 @@ theorem sum_pow6_div_four_pow_le (D : ℕ) :
   have h6 : (0 : ℝ) ≤ ((i : ℝ) + 1) ^ 6 := by positivity
   rw [div_le_iff₀ h4, div_mul_eq_mul_div, le_div_iff₀ h2]
   exact mul_le_mul_of_nonneg_left h24 h6
+
+/-- **The degree-`21` geometric decay of the `t_c·r_c²·n_c` term.**  The paper's per-call extra input is
+`2t²(n−1) + t(n−1+r²n)` with `r = 8t³`, i.e. `t·r² = 64t⁷ = 64γ⁷(d+1)²¹` — a polynomial of degree
+**21** in the level, which no single constant `C` absorbs.  The comparison with a geometric series is
+`((d+1)/202)²¹ ≤ 2^d` for `d ≥ 201`: the ratio `((d+2)/(d+1))²¹` is at most `(202/201)²¹ ≤ 2`, exactly
+what `2^d` grows by, so the induction from `d = 201` goes through. -/
+theorem pow21_le_two_pow : ∀ d : ℕ, 201 ≤ d → (((d : ℝ) + 1) / 202) ^ 21 ≤ 2 ^ d := by
+  intro d hd
+  induction d, hd using Nat.le_induction with
+  | base => norm_num
+  | succ d hd ih =>
+      have hstep : (((d : ℝ) + 1 + 1) / ((d : ℝ) + 1)) ^ 21 ≤ 2 := by
+        have hratio : ((d : ℝ) + 1 + 1) / ((d : ℝ) + 1) ≤ (202 : ℝ) / 201 := by
+          rw [div_le_div_iff₀ (by positivity) (by norm_num)]
+          have h201 : (201 : ℝ) ≤ d := by exact_mod_cast hd
+          nlinarith
+        have h202 : ((202 : ℝ) / 201) ^ 21 ≤ 2 := by norm_num
+        exact le_trans (pow_le_pow_left₀ (by positivity) hratio 21) h202
+      have hsplit : (((d : ℝ) + 1 + 1) / 202) ^ 21 =
+          (((d : ℝ) + 1 + 1) / ((d : ℝ) + 1)) ^ 21 * (((d : ℝ) + 1) / 202) ^ 21 := by
+        rw [← mul_pow]
+        congr 1
+        field_simp
+      push_cast
+      rw [hsplit, pow_succ]
+      calc (((d : ℝ) + 1 + 1) / ((d : ℝ) + 1)) ^ 21 * (((d : ℝ) + 1) / 202) ^ 21
+          ≤ 2 * 2 ^ d := mul_le_mul hstep ih (by positivity) (by norm_num)
+        _ = 2 ^ d * 2 := by ring
+
+/-- **`Σ_d (d+1)²¹/4^d ≤ 202²¹·2`** — the degree-`21` analogue of `sum_pow6_div_four_pow_le`.
+Term-wise `(d+1)²¹/4^d ≤ 202²¹/2^d` (for `d ≤ 201` because `(d+1)²¹ ≤ 202²¹` and `2^d ≤ 4^d`; for
+`d > 201` by `pow21_le_two_pow`), and `Σ 2^{-d} ≤ 2` by `geom_sum_le` at `c = 1/2`. -/
+theorem sum_pow21_div_four_pow_le (D : ℕ) :
+    (∑ d ∈ Finset.range D, ((d : ℝ) + 1) ^ 21 / 4 ^ d) ≤ (202 : ℝ) ^ 21 * 2 := by
+  have hterm : ∀ d ∈ Finset.range D,
+      ((d : ℝ) + 1) ^ 21 / 4 ^ d ≤ (202 : ℝ) ^ 21 / 2 ^ d := by
+    intro d _
+    have h24 : (2 : ℝ) ^ d ≤ 4 ^ d := by
+      rw [show (4 : ℝ) = 2 ^ 2 by norm_num, ← pow_mul]
+      exact pow_le_pow_right₀ (by norm_num) (by omega)
+    rw [div_le_div_iff₀ (by positivity) (by positivity)]
+    rcases le_or_gt d 201 with hd | hd
+    · have h1 : ((d : ℝ) + 1) ^ 21 ≤ (202 : ℝ) ^ 21 := by
+        apply pow_le_pow_left₀ (by positivity)
+        have : (d : ℝ) ≤ 201 := by exact_mod_cast hd
+        linarith
+      exact mul_le_mul h1 h24 (by positivity) (by positivity)
+    · have hA : (((d : ℝ) + 1) / 202) ^ 21 ≤ 2 ^ d := pow21_le_two_pow d (by omega)
+      have h1 : ((d : ℝ) + 1) ^ 21 ≤ (202 : ℝ) ^ 21 * 2 ^ d := by
+        have h := mul_le_mul_of_nonneg_left hA (show (0 : ℝ) ≤ (202 : ℝ) ^ 21 by positivity)
+        have he : (202 : ℝ) ^ 21 * (((d : ℝ) + 1) / 202) ^ 21 = ((d : ℝ) + 1) ^ 21 := by
+          rw [← mul_pow]
+          congr 1
+          field_simp
+        rwa [he] at h
+      have h4d : (4 : ℝ) ^ d = 2 ^ d * 2 ^ d := by
+        rw [show (4 : ℝ) = 2 * 2 by norm_num, mul_pow]
+      rw [h4d]
+      calc ((d : ℝ) + 1) ^ 21 * 2 ^ d
+          ≤ ((202 : ℝ) ^ 21 * 2 ^ d) * 2 ^ d := mul_le_mul_of_nonneg_right h1 (by positivity)
+        _ = (202 : ℝ) ^ 21 * (2 ^ d * 2 ^ d) := by ring
+  calc (∑ d ∈ Finset.range D, ((d : ℝ) + 1) ^ 21 / 4 ^ d)
+      ≤ ∑ d ∈ Finset.range D, (202 : ℝ) ^ 21 / 2 ^ d := Finset.sum_le_sum hterm
+    _ = (202 : ℝ) ^ 21 * ∑ d ∈ Finset.range D, (1 / 2 : ℝ) ^ d := by
+        rw [Finset.mul_sum]
+        refine Finset.sum_congr rfl (fun d _ => ?_)
+        rw [div_pow, one_pow]
+        ring
+    _ ≤ (202 : ℝ) ^ 21 * 2 := by
+        apply mul_le_mul_of_nonneg_left _ (by positivity)
+        have hg := geom_sum_le (g := fun k => (1 / 2 : ℝ) ^ k) (c := 1 / 2) (by norm_num)
+          (by norm_num) (by norm_num)
+          (fun k => by rw [pow_succ]; exact le_of_eq (mul_comm _ _)) D
+        have hg2 : (∑ k ∈ Finset.range D, (1 / 2 : ℝ) ^ k) ≤ (1 : ℝ) / (1 - 1 / 2) := by
+          simpa using hg
+        have hgo : (1 : ℝ) / (1 - 1 / 2) = 2 := by norm_num
+        linarith [hg2, hgo]
+
+/-- **The degree-`21` factor against the `4^{-d}` vertex shrink.**  If level `d` has
+`n_d·4^d ≤ n`, then `Σ_d A(d+1)²¹n_d ≤ A·202²¹·2·n` — the `n_c` piece of the honest per-call input,
+with the whole geometric series charged to `n`. -/
+theorem sum_pow21_mul_le {A : ℝ} (hA : 0 ≤ A) {D : ℕ} {nL : ℕ → ℕ} {n : ℕ}
+    (hn : ∀ d ∈ Finset.range D, (nL d : ℝ) * 4 ^ d ≤ (n : ℝ)) :
+    (∑ d ∈ Finset.range D, A * ((d : ℝ) + 1) ^ 21 * (nL d : ℝ))
+      ≤ A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) := by
+  have hpoint : ∀ d ∈ Finset.range D,
+      A * ((d : ℝ) + 1) ^ 21 * (nL d : ℝ) ≤
+        (A * (((d : ℝ) + 1) ^ 21 / 4 ^ d)) * (n : ℝ) := by
+    intro d hd
+    have h4 : (0 : ℝ) < 4 ^ d := by positivity
+    have hnd : (nL d : ℝ) ≤ (n : ℝ) / 4 ^ d := by
+      rw [le_div_iff₀ h4]
+      linarith [hn d hd]
+    calc A * ((d : ℝ) + 1) ^ 21 * (nL d : ℝ)
+        ≤ A * ((d : ℝ) + 1) ^ 21 * ((n : ℝ) / 4 ^ d) :=
+          mul_le_mul_of_nonneg_left hnd (by positivity)
+      _ = (A * (((d : ℝ) + 1) ^ 21 / 4 ^ d)) * (n : ℝ) := by ring
+  calc (∑ d ∈ Finset.range D, A * ((d : ℝ) + 1) ^ 21 * (nL d : ℝ))
+      ≤ ∑ d ∈ Finset.range D, (A * (((d : ℝ) + 1) ^ 21 / 4 ^ d)) * (n : ℝ) :=
+        Finset.sum_le_sum hpoint
+    _ = (A * (∑ d ∈ Finset.range D, (((d : ℝ) + 1) ^ 21 / 4 ^ d))) * (n : ℝ) := by
+        rw [← Finset.sum_mul, ← Finset.mul_sum]
+    _ ≤ A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) := by
+        apply mul_le_mul_of_nonneg_right _ (by positivity)
+        exact mul_le_mul_of_nonneg_left (sum_pow21_div_four_pow_le D) hA
 
 /-- **`Σ_d 4m_d/(γd³) ≤ 8m/γ`**, the `4m/t` half of the error account, isolated so that the honest
 per-call "rest" below can charge it a second time. -/
@@ -474,6 +592,89 @@ theorem errors_levels_rest {n m : ℕ} {γ : ℝ} (hγ : 0 < γ) {D : ℕ} {nL m
   rw [hsplit]
   linarith [hgeo, hcub, hquad, hsum_err, hsum_in]
 
+/-- **§3.6's error account with the paper's actual per-call input.**  The per-call extra is
+`A(d+1)²¹n_c` — with `A` absorbing the constants `2γ²`, `γ`, `64γ⁷`, this is the honest
+`2t²(n−1) + t(n−1+r²n)` at `t = γ(d+1)³`, `r = 8t³`.  The errors are charged twice, as in
+`errors_levels_rest`, so
+
+`Σ errL + Σ inL ≤ γ²·40000·2·√(mn) + 16m/γ + A·202²¹·2·n`:
+
+the paper's `16m/γ` survives and the degree-`21` piece lands in the linear-`n` term. -/
+theorem errors_levels_poly {n m : ℕ} {γ A : ℝ} (hγ : 0 < γ) (hA : 0 ≤ A) {D : ℕ}
+    {nL mL errL inL : ℕ → ℕ}
+    (hn : ∀ i ∈ Finset.range D, (nL i : ℝ) * 4 ^ i ≤ (n : ℝ))
+    (hm : ∀ i ∈ Finset.range D, (mL i : ℝ) ≤ (m : ℝ))
+    (herr : ∀ i ∈ Finset.range D, (errL i : ℝ) ≤
+      (γ * ((i : ℝ) + 1) ^ 3) ^ 2 * Real.sqrt ((mL i : ℝ) * (nL i : ℝ)) +
+        4 * (mL i : ℝ) / (γ * ((i : ℝ) + 1) ^ 3))
+    (hin : ∀ i ∈ Finset.range D, (inL i : ℝ) ≤ (errL i : ℝ) +
+      A * ((i : ℝ) + 1) ^ 21 * (nL i : ℝ)) :
+    ((∑ i ∈ Finset.range D, (errL i : ℝ)) + ∑ i ∈ Finset.range D, (inL i : ℝ))
+      ≤ γ ^ 2 * 40000 * 2 * Real.sqrt ((m : ℝ) * (n : ℝ)) + 16 * (m : ℝ) / γ +
+        A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) := by
+  have hgeo := claim_3_13 (n := n) (m := m) (γ := γ) hγ.le (D := D) (nL := nL) (mL := mL) hn hm
+  have hcub := sum_cubic_le (γ := γ) hγ (D := D) (m := m) (mL := mL) hm
+  have hpoly := sum_pow21_mul_le (A := A) hA (D := D) (nL := nL) (n := n) hn
+  have hsum_err : (∑ i ∈ Finset.range D, (errL i : ℝ)) ≤
+      (∑ i ∈ Finset.range D,
+          (γ * ((i : ℝ) + 1) ^ 3) ^ 2 * Real.sqrt ((mL i : ℝ) * (nL i : ℝ))) +
+        ∑ i ∈ Finset.range D, 4 * (mL i : ℝ) / (γ * ((i : ℝ) + 1) ^ 3) := by
+    rw [← Finset.sum_add_distrib]
+    exact Finset.sum_le_sum herr
+  have hsum_in : (∑ i ∈ Finset.range D, (inL i : ℝ)) ≤
+      (∑ i ∈ Finset.range D, (errL i : ℝ)) +
+        ∑ i ∈ Finset.range D, A * ((i : ℝ) + 1) ^ 21 * (nL i : ℝ) := by
+    rw [← Finset.sum_add_distrib]
+    exact Finset.sum_le_sum hin
+  have hsplit : γ ^ 2 * 40000 * 2 * Real.sqrt ((m : ℝ) * (n : ℝ)) + 16 * (m : ℝ) / γ +
+        A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) =
+      (γ ^ 2 * 40000 * Real.sqrt ((m : ℝ) * (n : ℝ)) +
+          γ ^ 2 * 40000 * Real.sqrt ((m : ℝ) * (n : ℝ))) +
+        (8 * (m : ℝ) / γ + 8 * (m : ℝ) / γ) +
+        A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) := by ring
+  rw [hsplit]
+  linarith [hgeo, hcub, hpoly, hsum_err, hsum_in]
+
+/-- **`errors_levels_poly` with the `t²√(m_cn_c)` coefficient open.**  Per level the error bound is
+`K·t_d²√(m_d n_d) + 4m_d/t_d`; the level sum is then
+`γ²·40000·K·2·√(mn) + 16m/γ + A·202²¹·2·n`.  With `K = 10` (`error_count_le`) this is the display
+chain fed by the paper's actual error count instead of its `O(1)`. -/
+theorem errors_levels_poly_coef {n m : ℕ} {γ A K : ℝ} (hγ : 0 < γ) (hA : 0 ≤ A) (hK : 0 ≤ K)
+    {D : ℕ} {nL mL errL inL : ℕ → ℕ}
+    (hn : ∀ i ∈ Finset.range D, (nL i : ℝ) * 4 ^ i ≤ (n : ℝ))
+    (hm : ∀ i ∈ Finset.range D, (mL i : ℝ) ≤ (m : ℝ))
+    (herr : ∀ i ∈ Finset.range D, (errL i : ℝ) ≤
+      K * ((γ * ((i : ℝ) + 1) ^ 3) ^ 2 * Real.sqrt ((mL i : ℝ) * (nL i : ℝ))) +
+        4 * (mL i : ℝ) / (γ * ((i : ℝ) + 1) ^ 3))
+    (hin : ∀ i ∈ Finset.range D, (inL i : ℝ) ≤ (errL i : ℝ) +
+      A * ((i : ℝ) + 1) ^ 21 * (nL i : ℝ)) :
+    ((∑ i ∈ Finset.range D, (errL i : ℝ)) + ∑ i ∈ Finset.range D, (inL i : ℝ))
+      ≤ γ ^ 2 * 40000 * K * 2 * Real.sqrt ((m : ℝ) * (n : ℝ)) + 16 * (m : ℝ) / γ +
+        A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) := by
+  have hgeo := claim_3_13_coef (n := n) (m := m) (γ := γ) (K := K) hγ.le hK
+    (D := D) (nL := nL) (mL := mL) hn hm
+  have hcub := sum_cubic_le (γ := γ) hγ (D := D) (m := m) (mL := mL) hm
+  have hpoly := sum_pow21_mul_le (A := A) hA (D := D) (nL := nL) (n := n) hn
+  have hsum_err : (∑ i ∈ Finset.range D, (errL i : ℝ)) ≤
+      (∑ i ∈ Finset.range D,
+          K * ((γ * ((i : ℝ) + 1) ^ 3) ^ 2 * Real.sqrt ((mL i : ℝ) * (nL i : ℝ)))) +
+        ∑ i ∈ Finset.range D, 4 * (mL i : ℝ) / (γ * ((i : ℝ) + 1) ^ 3) := by
+    rw [← Finset.sum_add_distrib]
+    exact Finset.sum_le_sum herr
+  have hsum_in : (∑ i ∈ Finset.range D, (inL i : ℝ)) ≤
+      (∑ i ∈ Finset.range D, (errL i : ℝ)) +
+        ∑ i ∈ Finset.range D, A * ((i : ℝ) + 1) ^ 21 * (nL i : ℝ) := by
+    rw [← Finset.sum_add_distrib]
+    exact Finset.sum_le_sum hin
+  have hsplit : γ ^ 2 * 40000 * K * 2 * Real.sqrt ((m : ℝ) * (n : ℝ)) + 16 * (m : ℝ) / γ +
+        A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) =
+      (K * (γ ^ 2 * 40000 * Real.sqrt ((m : ℝ) * (n : ℝ))) +
+          K * (γ ^ 2 * 40000 * Real.sqrt ((m : ℝ) * (n : ℝ)))) +
+        (8 * (m : ℝ) / γ + 8 * (m : ℝ) / γ) +
+        A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) := by ring
+  rw [hsplit]
+  linarith [hgeo, hcub, hpoly, hsum_err, hsum_in]
+
 /-! ## 4. Assembly: the display of Lemma 3.1 -/
 
 /-- **`lemma12_bound` with the `√(mn)` constant left open.**  The proof only ever uses `40000` as a
@@ -506,6 +707,234 @@ theorem lemma12_bound_gen {n m Fc U SE : ℕ} {γ ε K : ℝ} (hγ : 0 < γ) (_h
       γ ^ 2 * K * Real.sqrt ((m : ℝ) * (n : ℝ)) + ε * (m : ℝ) := by linarith
   have hF' : (Fc : ℝ) ≤ Real.sqrt 2 * Real.sqrt ((m : ℝ) * (n : ℝ)) := le_trans hF hn_sqrt
   nlinarith
+
+/-- **`lemma12_bound` with an extra `E·n` in the rest.**  The paper's honest account leaves a term
+linear in `n` (the degree-`21` piece `A·202²¹·2·n` of `errors_levels_poly`); since `n ≤ √2·√(mn)` it
+folds into the `√(mn)` constant, at the price of `√2·E`: `C_ε = √2 + γ²K + √2·E`. -/
+theorem lemma12_bound_extra {n m Fc U SE : ℕ} {γ ε K E : ℝ} (hγ : 0 < γ) (_hε : 0 < ε)
+    (hγε : 16 ≤ ε * γ) (_hK : 0 ≤ K) (hE : 0 ≤ E) (hnm : (n : ℝ) ≤ 2 * (m : ℝ))
+    (hF : (Fc : ℝ) ≤ (n : ℝ))
+    (hrest : (U : ℝ) + (SE : ℝ) ≤
+      γ ^ 2 * K * Real.sqrt ((m : ℝ) * (n : ℝ)) + 16 * (m : ℝ) / γ + E * (n : ℝ)) :
+    (Fc : ℝ) + (U : ℝ) + (SE : ℝ) ≤
+      ε * (m : ℝ) + (Real.sqrt 2 + γ ^ 2 * K + Real.sqrt 2 * E) *
+        Real.sqrt ((m : ℝ) * (n : ℝ)) := by
+  have hm0 : (0 : ℝ) ≤ (m : ℝ) := by positivity
+  have hn0 : (0 : ℝ) ≤ (n : ℝ) := by positivity
+  have hn_sqrt : (n : ℝ) ≤ Real.sqrt 2 * Real.sqrt ((m : ℝ) * (n : ℝ)) := by
+    have hsq : (n : ℝ) * (n : ℝ) ≤ (2 * (m : ℝ)) * (n : ℝ) :=
+      mul_le_mul_of_nonneg_right hnm hn0
+    have h1 : (n : ℝ) ≤ Real.sqrt (2 * (m : ℝ) * (n : ℝ)) := by
+      rw [Real.le_sqrt (by positivity) (by positivity)]
+      nlinarith
+    calc (n : ℝ) ≤ Real.sqrt (2 * (m : ℝ) * (n : ℝ)) := h1
+      _ = Real.sqrt 2 * Real.sqrt ((m : ℝ) * (n : ℝ)) := by
+          rw [show (2 : ℝ) * (m : ℝ) * (n : ℝ) = 2 * ((m : ℝ) * (n : ℝ)) by ring,
+            Real.sqrt_mul (by norm_num)]
+  have hlast : 16 * (m : ℝ) / γ ≤ ε * (m : ℝ) := by
+    rw [div_le_iff₀ hγ]
+    have h := mul_le_mul_of_nonneg_right hγε hm0
+    nlinarith
+  have hE' : E * (n : ℝ) ≤ (Real.sqrt 2 * E) * Real.sqrt ((m : ℝ) * (n : ℝ)) := by
+    calc E * (n : ℝ) ≤ E * (Real.sqrt 2 * Real.sqrt ((m : ℝ) * (n : ℝ))) :=
+          mul_le_mul_of_nonneg_left hn_sqrt hE
+      _ = (Real.sqrt 2 * E) * Real.sqrt ((m : ℝ) * (n : ℝ)) := by ring
+  have hrest' : (U : ℝ) + (SE : ℝ) ≤
+      γ ^ 2 * K * Real.sqrt ((m : ℝ) * (n : ℝ)) + ε * (m : ℝ) +
+        (Real.sqrt 2 * E) * Real.sqrt ((m : ℝ) * (n : ℝ)) := by linarith
+  have hF' : (Fc : ℝ) ≤ Real.sqrt 2 * Real.sqrt ((m : ℝ) * (n : ℝ)) := le_trans hF hn_sqrt
+  have hsplit : (Real.sqrt 2 + γ ^ 2 * K + Real.sqrt 2 * E) *
+        Real.sqrt ((m : ℝ) * (n : ℝ)) =
+      Real.sqrt 2 * Real.sqrt ((m : ℝ) * (n : ℝ)) +
+        γ ^ 2 * K * Real.sqrt ((m : ℝ) * (n : ℝ)) +
+        (Real.sqrt 2 * E) * Real.sqrt ((m : ℝ) * (n : ℝ)) := by ring
+  rw [hsplit]
+  linarith
+
+/-- **The paper's §3.6 exact-MSF input count, as a sum over the round structure.**  The call runs
+`t²` rounds, each contributing an exact MSF input of at most `2(n−1)` (old forest ∪ child forest, each
+a forest on at most `n` vertices), and `t` blocks, each contributing `(n−1) + r²n` (old forest ∪ the
+declared set `D`, `|D| ≤ r²n`); `rej` is the rejected edges, counted globally.  This is the literal
+line "`2t²_c(n_c−1) + t_c(n_c−1+r²_cn_c)`" of p. 24. -/
+theorem msf_input_count {n t r rej : ℕ} {roundIn : Fin (t ^ 2) → ℕ} {blkIn : Fin t → ℕ}
+    (hround : ∀ i, roundIn i ≤ 2 * (n - 1))
+    (hblk : ∀ b, blkIn b ≤ (n - 1) + r ^ 2 * n) :
+    rej + (∑ i, roundIn i) + (∑ b, blkIn b) ≤
+      rej + 2 * t ^ 2 * (n - 1) + t * ((n - 1) + r ^ 2 * n) := by
+  have h1 : (∑ i : Fin (t ^ 2), roundIn i) ≤ 2 * t ^ 2 * (n - 1) := by
+    refine le_trans (Finset.sum_le_sum (fun i _ => hround i)) ?_
+    rw [Finset.sum_const, Finset.card_univ, Fintype.card_fin, smul_eq_mul]
+    exact le_of_eq (by ring)
+  have h2 : (∑ b : Fin t, blkIn b) ≤ t * ((n - 1) + r ^ 2 * n) := by
+    refine le_trans (Finset.sum_le_sum (fun b _ => hblk b)) ?_
+    rw [Finset.sum_const, Finset.card_univ, Fintype.card_fin, smul_eq_mul]
+  omega
+
+/-- **§3.6's second count, the structural half.**  If the children's inputs are pairwise disjoint and
+lie inside the union of the rejected edges and the per-round / per-block exact-MSF inputs, and those
+have the paper's per-round `2(n−1)` and per-block `(n−1)+r²n` sizes, then the children's total input is
+at most `|Rej| + 2t²(n−1) + t(n−1+r²n)` — the `inF` bound consumed by
+`display_of_strategy_of_calls_count`.  Only the containment `hsub` is procedure-specific; the numeric
+half is `msf_input_count`/`msf_input_le_poly`. -/
+theorem sum_card_kid_le_inputs {σ : Type*} [Fintype σ] [DecidableEq σ] {t r n rej : ℕ}
+    {kid : σ → Finset E} {Rej : Finset E}
+    {roundIn : Fin (t ^ 2) → Finset E} {blkIn : Fin t → Finset E}
+    (hkdisj : ∀ i j, i ≠ j → Disjoint (kid i) (kid j))
+    (hsub : ∀ i, kid i ⊆ Rej ∪ (Finset.univ.biUnion roundIn ∪ Finset.univ.biUnion blkIn))
+    (hround : ∀ i, (roundIn i).card ≤ 2 * (n - 1))
+    (hblk : ∀ b, (blkIn b).card ≤ (n - 1) + r ^ 2 * n)
+    (hrej : Rej.card ≤ rej) :
+    ∑ i, (kid i).card ≤ rej + 2 * t ^ 2 * (n - 1) + t * ((n - 1) + r ^ 2 * n) := by
+  classical
+  have hEq : (Finset.univ.biUnion kid).card = ∑ i, (kid i).card := by
+    rw [Finset.card_biUnion]
+    intro i _ j _ hij
+    exact hkdisj i j hij
+  have h1 : (Finset.univ.biUnion kid).card ≤
+      (Rej ∪ (Finset.univ.biUnion roundIn ∪ Finset.univ.biUnion blkIn)).card :=
+    Finset.card_le_card (Finset.biUnion_subset.mpr (fun i _ => hsub i))
+  have h2 : (Rej ∪ (Finset.univ.biUnion roundIn ∪ Finset.univ.biUnion blkIn)).card ≤
+      Rej.card + (Finset.univ.biUnion roundIn ∪ Finset.univ.biUnion blkIn).card :=
+    Finset.card_union_le _ _
+  have h3 : (Finset.univ.biUnion roundIn ∪ Finset.univ.biUnion blkIn).card ≤
+      (Finset.univ.biUnion roundIn).card + (Finset.univ.biUnion blkIn).card :=
+    Finset.card_union_le _ _
+  have h4 : (Finset.univ.biUnion roundIn).card ≤ ∑ i, (roundIn i).card :=
+    Finset.card_biUnion_le
+  have h5 : (Finset.univ.biUnion blkIn).card ≤ ∑ b, (blkIn b).card :=
+    Finset.card_biUnion_le
+  have h6 : (∑ i : Fin (t ^ 2), (roundIn i).card) ≤ 2 * t ^ 2 * (n - 1) := by
+    refine le_trans (Finset.sum_le_sum (fun i _ => hround i)) ?_
+    rw [Finset.sum_const, Finset.card_univ, Fintype.card_fin, smul_eq_mul]
+    exact le_of_eq (by ring)
+  have h7 : (∑ b : Fin t, (blkIn b).card) ≤ t * ((n - 1) + r ^ 2 * n) := by
+    refine le_trans (Finset.sum_le_sum (fun b _ => hblk b)) ?_
+    rw [Finset.sum_const, Finset.card_univ, Fintype.card_fin, smul_eq_mul]
+  omega
+
+/-- **`2t²(n−1) + t(n−1+r²n) = O((d+1)²¹n)` at `t = γ(d+1)³`, `r = 8t³`.**  With those parameters
+`t² = γ²(d+1)⁶` and `r² = 64γ⁶(d+1)¹⁸`, so the degree-`21` term `t·r²n = 64γ⁷(d+1)²¹n` dominates the
+two lower-order pieces, and the per-call exact-MSF input is at most
+`[rejected] + A·(d+1)²¹·n` with `A = 2γ² + γ + 64γ⁷` — exactly the coefficient
+`hrest_of_instances_poly` asks for.  (`n − 1 ≤ n` is the only slack used, so the statement also covers
+`n = 0`.) -/
+theorem msf_input_le_poly {n d : ℕ} {γ rej t r inp : ℝ} (hγ1 : 1 ≤ γ)
+    (ht : t = γ * ((d : ℝ) + 1) ^ 3) (hr : r = 8 * t ^ 3)
+    (hcount : inp ≤ rej + 2 * t ^ 2 * ((n : ℝ) - 1) + t * ((n : ℝ) - 1 + r ^ 2 * (n : ℝ))) :
+    inp ≤ rej + (2 * γ ^ 2 + γ + 64 * γ ^ 7) * ((d : ℝ) + 1) ^ 21 * (n : ℝ) := by
+  have hγ0 : (0 : ℝ) < γ := by linarith
+  have hd1 : (1 : ℝ) ≤ (d : ℝ) + 1 := by
+    have h : (0 : ℝ) ≤ (d : ℝ) := Nat.cast_nonneg d
+    linarith
+  have hn0 : (0 : ℝ) ≤ (n : ℝ) := by positivity
+  have hsub : (n : ℝ) - 1 ≤ (n : ℝ) := by linarith
+  have ht2 : t ^ 2 = γ ^ 2 * ((d : ℝ) + 1) ^ 6 := by rw [ht]; ring
+  have h6 : ((d : ℝ) + 1) ^ 6 ≤ ((d : ℝ) + 1) ^ 21 := pow_le_pow_right₀ hd1 (by norm_num)
+  have h3 : ((d : ℝ) + 1) ^ 3 ≤ ((d : ℝ) + 1) ^ 21 := pow_le_pow_right₀ hd1 (by norm_num)
+  have hmain : rej + 2 * t ^ 2 * ((n : ℝ) - 1) + t * ((n : ℝ) - 1 + r ^ 2 * (n : ℝ)) ≤
+      rej + (2 * γ ^ 2 + γ + 64 * γ ^ 7) * ((d : ℝ) + 1) ^ 21 * (n : ℝ) := by
+    have hA : 2 * t ^ 2 * ((n : ℝ) - 1) ≤ 2 * γ ^ 2 * ((d : ℝ) + 1) ^ 21 * (n : ℝ) := by
+      have e : 2 * t ^ 2 * ((n : ℝ) - 1) = 2 * γ ^ 2 * ((d : ℝ) + 1) ^ 6 * ((n : ℝ) - 1) := by
+        rw [ht2]; ring
+      rw [e]
+      calc 2 * γ ^ 2 * ((d : ℝ) + 1) ^ 6 * ((n : ℝ) - 1)
+          ≤ 2 * γ ^ 2 * ((d : ℝ) + 1) ^ 6 * (n : ℝ) := mul_le_mul_of_nonneg_left hsub (by positivity)
+        _ ≤ 2 * γ ^ 2 * ((d : ℝ) + 1) ^ 21 * (n : ℝ) :=
+            mul_le_mul_of_nonneg_right (mul_le_mul_of_nonneg_left h6 (by positivity)) hn0
+    have hB : t * ((n : ℝ) - 1) ≤ γ * ((d : ℝ) + 1) ^ 21 * (n : ℝ) := by
+      have e : t * ((n : ℝ) - 1) = γ * ((d : ℝ) + 1) ^ 3 * ((n : ℝ) - 1) := by rw [ht]
+      rw [e]
+      calc γ * ((d : ℝ) + 1) ^ 3 * ((n : ℝ) - 1)
+          ≤ γ * ((d : ℝ) + 1) ^ 3 * (n : ℝ) := mul_le_mul_of_nonneg_left hsub (by positivity)
+        _ ≤ γ * ((d : ℝ) + 1) ^ 21 * (n : ℝ) :=
+            mul_le_mul_of_nonneg_right (mul_le_mul_of_nonneg_left h3 (le_of_lt hγ0)) hn0
+    have hC : t * (r ^ 2 * (n : ℝ)) = 64 * γ ^ 7 * ((d : ℝ) + 1) ^ 21 * (n : ℝ) := by
+      have e : r ^ 2 = 64 * γ ^ 6 * ((d : ℝ) + 1) ^ 18 := by rw [hr, ht]; ring
+      rw [e, ht]; ring
+    have hexp : t * ((n : ℝ) - 1 + r ^ 2 * (n : ℝ)) =
+        t * ((n : ℝ) - 1) + t * (r ^ 2 * (n : ℝ)) := by ring
+    have hsplit : (2 * γ ^ 2 + γ + 64 * γ ^ 7) * ((d : ℝ) + 1) ^ 21 * (n : ℝ) =
+        2 * γ ^ 2 * ((d : ℝ) + 1) ^ 21 * (n : ℝ) + γ * ((d : ℝ) + 1) ^ 21 * (n : ℝ) +
+          64 * γ ^ 7 * ((d : ℝ) + 1) ^ 21 * (n : ℝ) := by ring
+    rw [hexp, hsplit]
+    linarith
+  linarith
+
+/-- **The two error sources of one call, with the constants kept.**  Type-1 errors (edges scheduled
+in a bad round) satisfy `lost·log 2 ≤ (2√2+4)t²√(mn) + 2m/t` (`ScheduleBound.exists_schedule_lost_paper`);
+type-2 errors (wrong estimated preferred action) are at most `m/t` (§3.5).  Since `log 2 > 0.693`,
+`1/log 2 ≤ 1000/693`, and `(1000/693)(2√2+4) < 10` (as `√2 < 1.42`), the total is at most
+`10·t²√(mn) + 4m/t` — the paper's `O(t²_c√(m_cn_c)) + 4m_c/t_c` with the hidden constant made
+explicit: the `t²√` coefficient is `10`, not `1`. -/
+theorem error_count_le {lost err2 t m n : ℝ} (ht : 0 < t) (hm : 0 ≤ m) (_hn : 0 ≤ n)
+    (hlost : lost * Real.log 2 ≤
+      (2 * Real.sqrt 2 + 4) * t ^ 2 * Real.sqrt (m * n) + 2 * m / t)
+    (herr2 : err2 ≤ m / t) :
+    lost + err2 ≤ 10 * t ^ 2 * Real.sqrt (m * n) + 4 * m / t := by
+  have hsl : Real.sqrt 2 < 142 / 100 := by
+    rw [Real.sqrt_lt' (by norm_num)]
+    norm_num
+  have hlog2 : (0.6931471803 : ℝ) < Real.log 2 := Real.log_two_gt_d9
+  have hlog0 : (0 : ℝ) < Real.log 2 := by linarith
+  have hα : 1 / Real.log 2 ≤ 1000 / 693 := by
+    rw [div_le_iff₀ hlog0]
+    nlinarith
+  have hK1 : (2 * Real.sqrt 2 + 4) * (1000 / 693) ≤ 10 := by nlinarith [hsl]
+  have hK2 : 2 * ((1000 : ℝ) / 693) ≤ 3 := by norm_num
+  have hB : (0 : ℝ) ≤ (2 * Real.sqrt 2 + 4) * t ^ 2 * Real.sqrt (m * n) + 2 * m / t := by positivity
+  have hl' : lost ≤
+      ((2 * Real.sqrt 2 + 4) * t ^ 2 * Real.sqrt (m * n)) * (1000 / 693) +
+        (2 * m / t) * (1000 / 693) := by
+    have h1 : lost = lost * Real.log 2 / Real.log 2 := by field_simp
+    rw [h1]
+    calc lost * Real.log 2 / Real.log 2
+        ≤ ((2 * Real.sqrt 2 + 4) * t ^ 2 * Real.sqrt (m * n) + 2 * m / t) / Real.log 2 := by
+          gcongr
+      _ = ((2 * Real.sqrt 2 + 4) * t ^ 2 * Real.sqrt (m * n) + 2 * m / t) *
+            (1 / Real.log 2) := by ring
+      _ ≤ ((2 * Real.sqrt 2 + 4) * t ^ 2 * Real.sqrt (m * n) + 2 * m / t) *
+            (1000 / 693) := by gcongr
+      _ = ((2 * Real.sqrt 2 + 4) * t ^ 2 * Real.sqrt (m * n)) * (1000 / 693) +
+            (2 * m / t) * (1000 / 693) := by ring
+  have hT : ((2 * Real.sqrt 2 + 4) * t ^ 2 * Real.sqrt (m * n)) * (1000 / 693) ≤
+      10 * t ^ 2 * Real.sqrt (m * n) := by
+    have := mul_le_mul_of_nonneg_right hK1 (by positivity : (0 : ℝ) ≤ t ^ 2 * Real.sqrt (m * n))
+    calc ((2 * Real.sqrt 2 + 4) * t ^ 2 * Real.sqrt (m * n)) * (1000 / 693)
+        = ((2 * Real.sqrt 2 + 4) * (1000 / 693)) * (t ^ 2 * Real.sqrt (m * n)) := by ring
+      _ ≤ 10 * (t ^ 2 * Real.sqrt (m * n)) := this
+      _ = 10 * t ^ 2 * Real.sqrt (m * n) := by ring
+  have hM : (2 * m / t) * (1000 / 693) ≤ 3 * (m / t) := by
+    have := mul_le_mul_of_nonneg_right hK2 (by positivity : (0 : ℝ) ≤ m / t)
+    calc (2 * m / t) * (1000 / 693) = (2 * (1000 / 693)) * (m / t) := by ring
+      _ ≤ 3 * (m / t) := this
+  have h3 : 3 * (m / t) + m / t = 4 * (m / t) := by ring
+  have h4 : 4 * m / t = 4 * (m / t) := by ring
+  rw [h4] at *
+  linarith
+
+/-- **The retained set against the error budget.**  If the instance's `|U(F)|` is at most the scheduled
+`lost` count and the two §3.4/§3.5 halves bound `lost` and the estimate errors `err2 ≥ 0`, then
+`|U(F)| ≤ 10t²√(mn) + 4m/t` — the error premise of the display, produced from the counting halves
+rather than assumed. -/
+theorem error_count_le_of_U {U lost err2 t m n : ℝ} (ht : 0 < t) (hm : 0 ≤ m) (hn : 0 ≤ n)
+    (hU : U ≤ lost)
+    (hlost : lost * Real.log 2 ≤
+      (2 * Real.sqrt 2 + 4) * t ^ 2 * Real.sqrt (m * n) + 2 * m / t)
+    (herr2 : err2 ≤ m / t) (h0 : 0 ≤ err2) :
+    U ≤ 10 * t ^ 2 * Real.sqrt (m * n) + 4 * m / t :=
+  hU.trans (le_trans (le_add_of_nonneg_right h0) (error_count_le ht hm hn hlost herr2))
+
+/-- **The retained set against the split error budget.**  `error_count_le` consumes `lost + err2`
+directly, so the display's error premise follows from the *disjunctive* per-edge premise of §3.3 —
+`|U| ≤ lost + #mis` (`CallOut.RoundData.card_U_le_lost_add_mis`) — with no extra sign condition on
+`err2`: the two numeric halves are exactly Lemma 3.11's `lost` bound and Claim 3.12's `m/t`. -/
+theorem error_count_le_of_U_add {U lost err2 t m n : ℝ} (ht : 0 < t) (hm : 0 ≤ m) (hn : 0 ≤ n)
+    (hU : U ≤ lost + err2)
+    (hlost : lost * Real.log 2 ≤
+      (2 * Real.sqrt 2 + 4) * t ^ 2 * Real.sqrt (m * n) + 2 * m / t)
+    (herr2 : err2 ≤ m / t) :
+    U ≤ 10 * t ^ 2 * Real.sqrt (m * n) + 4 * m / t :=
+  hU.trans (error_count_le ht hm hn hlost herr2)
 
 /-- **Lemma 3.1 / Lemma 1.2, the display `|F| + |U(F)| + Σᵢ|Eᵢ| ≤ εm + C_ε√(mn)`.**
 

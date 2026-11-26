@@ -55,17 +55,25 @@ variable {V E : Type*} [Fintype V] [DecidableEq V] [Fintype E] [DecidableEq E]
 /-- The output of one certificate call on the instance `(P, E₀)`: the forest `F` it returns, and
 its children, each a recursive call on its own portal set `kidV i` and input `kidE i`.
 
-The fields are exactly the facts §3.6's bookkeeping uses.  `hcover` is the "an edge is passed to at
-most one child" (here: *exactly one* of `F`, `U(F)`, or one child) and `hshrink` is "the `t²`
-children have in total a quarter of the vertices" (`2nt/r = n/4`).  Children *share* portals (the
-paper's `t²` calls all draw from the same `2nt/r` portal set), so `kidV` is not required to be
-pairwise disjoint — only the edge sets are. -/
+The fields are exactly the facts §3.6's bookkeeping uses, with the paper's **four** buckets:
+`F` (kept), `U(F) = unsupp ∩ E₀` (retained), `drop` (supported by `F` and therefore *discarded* —
+the paper's "we may filter out every supported edge outside `F`"), and the children's inputs.
+`hcover` is the "every edge is accounted for exactly once" and `hshrink` is "the `t²` children have
+in total a quarter of the vertices" (`2nt/r = n/4`).  Children *share* portals (the paper's `t²`
+calls all draw from the same `2nt/r` portal set), so `kidV` is not required to be pairwise
+disjoint — only the edge sets are.
+
+The `drop` bucket is what keeps the model faithful.  Without it (`drop = ∅`) the four-way cover
+forces `|F| + |U| + Σ|Eᵢ| = |E₀|`, so the display of Lemma 1.2 could only hold for instances with
+`m ≤ εm + C√(mn)`; with it, the display's left-hand side is `|E₀| − |drop|` and the paper's saving
+is the discarded supported edges (`CallOut.lhs_le`, `CallOut.partition_eq`). -/
 structure CallOut (G : WGraph V E) (ι : Type*) [Fintype ι] where
   P : Finset V
   E₀ : Finset E
   F : Finset E
   kidE : ι → Finset E
   kidV : ι → Finset V
+  drop : Finset E
   hFsub : F ⊆ E₀
   hforest : IsForest G F
   hFcard : F.card ≤ P.card
@@ -74,7 +82,12 @@ structure CallOut (G : WGraph V E) (ι : Type*) [Fintype ι] where
   hkidEdisj : ∀ i j, i ≠ j → Disjoint (kidE i) (kidE j)
   hFkid : ∀ i, Disjoint F (kidE i)
   hUkid : ∀ i, Disjoint (unsupp G F ∩ E₀) (kidE i)
-  hcover : ∀ e ∈ E₀, e ∈ F ∨ e ∈ unsupp G F ∨ ∃ i, e ∈ kidE i
+  hdropE : drop ⊆ E₀
+  hdrop_supp : ∀ e ∈ drop, supported G F e
+  hFdrop : Disjoint F drop
+  hUdrop : Disjoint (unsupp G F ∩ E₀) drop
+  hkid_drop : ∀ i, Disjoint (kidE i) drop
+  hcover : ∀ e ∈ E₀, e ∈ F ∨ e ∈ unsupp G F ∨ e ∈ drop ∨ ∃ i, e ∈ kidE i
   hshrink : 4 * (∑ i, (kidV i).card) ≤ P.card
 
 namespace CallOut
@@ -93,39 +106,65 @@ theorem kids_disjoint (O : CallOut G ι) :
     Set.PairwiseDisjoint (↑(Finset.univ : Finset ι)) O.kidE :=
   fun i _ j _ hij => O.hkidEdisj i j hij
 
-/-- **The partition identity**: `|F| + |U(F)| + Σᵢ|Eᵢ| = |E₀|`.  Every edge of the instance is in
-exactly one of the forest, the unsupported set, or one child's input — the paper's "an edge is
-projected and passed to exactly one child recursion instance". -/
+/-- **The four-bucket partition identity**:
+`|F| + |U(F)| + |drop| + Σᵢ|Eᵢ| = |E₀|`.  Every edge of the instance is in exactly one of the
+forest, the unsupported set, the discarded supported set, or one child's input — the paper's "an
+edge is projected and passed to exactly one child recursion instance", with the discarded
+supported edges as the fourth bucket. -/
 theorem partition_eq (O : CallOut G ι) :
-    O.F.card + O.U.card + ∑ i, (O.kidE i).card = O.E₀.card := by
-  have hii := O.kids_disjoint
-  have hcover : O.F ∪ O.U ∪ Finset.univ.biUnion O.kidE = O.E₀ := by
+    O.F.card + O.U.card + O.drop.card + ∑ i, (O.kidE i).card = O.E₀.card := by
+  have hFUd : Disjoint (O.F ∪ O.U) O.drop :=
+    Finset.disjoint_union_left.mpr ⟨O.hFdrop, O.hUdrop⟩
+  have hFUk : Disjoint (O.F ∪ O.U) (Finset.univ.biUnion O.kidE) := by
+    rw [Finset.disjoint_left]
+    intro x hx hxk
+    obtain ⟨i, -, hi⟩ := Finset.mem_biUnion.mp hxk
+    rcases Finset.mem_union.mp hx with hF | hU
+    · exact Finset.disjoint_left.mp (O.hFkid i) hF hi
+    · exact Finset.disjoint_left.mp (O.hUkid i) hU hi
+  have hdk : Disjoint O.drop (Finset.univ.biUnion O.kidE) := by
+    rw [Finset.disjoint_left]
+    intro x hx hxk
+    obtain ⟨i, -, hi⟩ := Finset.mem_biUnion.mp hxk
+    exact Finset.disjoint_left.mp (O.hkid_drop i) hi hx
+  have hcov : ((O.F ∪ O.U) ∪ O.drop) ∪ Finset.univ.biUnion O.kidE = O.E₀ := by
     apply Finset.Subset.antisymm
     · intro e he
-      rcases Finset.mem_union.mp he with heFU | heK
-      · rcases Finset.mem_union.mp heFU with heF | heU
-        · exact O.hFsub heF
-        · exact O.U_sub heU
-      · obtain ⟨i, -, hei⟩ := Finset.mem_biUnion.mp heK
-        exact O.hkidE i hei
+      rcases Finset.mem_union.mp he with h | hk
+      · rcases Finset.mem_union.mp h with hFU | hD
+        · rcases Finset.mem_union.mp hFU with hF | hU
+          · exact O.hFsub hF
+          · exact O.U_sub hU
+        · exact O.hdropE hD
+      · obtain ⟨i, -, hi⟩ := Finset.mem_biUnion.mp hk
+        exact O.hkidE i hi
     · intro e he
-      rcases O.hcover e he with heF | heU | ⟨i, hei⟩
-      · exact Finset.mem_union.mpr (Or.inl (Finset.mem_union.mpr (Or.inl heF)))
-      · exact Finset.mem_union.mpr
-          (Or.inl (Finset.mem_union.mpr (Or.inr (Finset.mem_inter.mpr ⟨heU, he⟩))))
-      · exact Finset.mem_union.mpr
-          (Or.inr (Finset.mem_biUnion.mpr ⟨i, Finset.mem_univ i, hei⟩))
-  have hUnion : Disjoint (O.F ∪ O.U) (Finset.univ.biUnion O.kidE) := by
-    rw [Finset.disjoint_biUnion_right]
-    intro i _
-    rw [Finset.disjoint_union_left]
-    exact ⟨O.hFkid i, O.hUkid i⟩
-  have h1 : (O.F ∪ O.U ∪ Finset.univ.biUnion O.kidE).card
-      = O.F.card + O.U.card + (Finset.univ.biUnion O.kidE).card := by
-    rw [Finset.card_union_of_disjoint hUnion, Finset.card_union_of_disjoint O.FU_disjoint]
-  have h2 : (Finset.univ.biUnion O.kidE).card = ∑ i, (O.kidE i).card :=
-    Finset.card_biUnion hii
-  rw [hcover] at h1
+      rcases O.hcover e he with hF | hU | hD | ⟨i, hi⟩
+      · exact Finset.mem_union_left _
+          (Finset.mem_union_left _ (Finset.mem_union_left _ hF))
+      · exact Finset.mem_union_left _
+          (Finset.mem_union_left _
+            (Finset.mem_union_right _ (Finset.mem_inter.mpr ⟨hU, he⟩)))
+      · exact Finset.mem_union_left _ (Finset.mem_union_right _ hD)
+      · exact Finset.mem_union_right _ (Finset.mem_biUnion.mpr ⟨i, Finset.mem_univ i, hi⟩)
+  have hk : (Finset.univ.biUnion O.kidE).card = ∑ i, (O.kidE i).card :=
+    Finset.card_biUnion O.kids_disjoint
+  calc O.F.card + O.U.card + O.drop.card + ∑ i, (O.kidE i).card
+      = O.F.card + O.U.card + O.drop.card + (Finset.univ.biUnion O.kidE).card := by rw [hk]
+    _ = (O.F ∪ O.U).card + O.drop.card + (Finset.univ.biUnion O.kidE).card := by
+        rw [Finset.card_union_of_disjoint O.FU_disjoint]
+    _ = ((O.F ∪ O.U) ∪ O.drop).card + (Finset.univ.biUnion O.kidE).card := by
+        rw [Finset.card_union_of_disjoint hFUd]
+    _ = (((O.F ∪ O.U) ∪ O.drop) ∪ Finset.univ.biUnion O.kidE).card := by
+        rw [Finset.card_union_of_disjoint (Finset.disjoint_union_left.mpr ⟨hFUk, hdk⟩)]
+    _ = O.E₀.card := by rw [hcov]
+
+/-- **The display's left-hand side is at most the instance's size**, with the deficit exactly the
+discarded supported edges (`lhs_le` is the inequality form of `partition_eq`; the paper's saving is
+precisely `|drop|`). -/
+theorem lhs_le (O : CallOut G ι) :
+    O.F.card + O.U.card + ∑ i, (O.kidE i).card ≤ O.E₀.card := by
+  have h := O.partition_eq
   omega
 
 /-- The children's inputs are at most as large as the instance's edge set. -/
@@ -270,6 +309,46 @@ theorem errors_gather {ι : Type*} [Fintype ι] {mC nC errC : ι → ℕ} {t : �
   rw [hsplit] at hstep
   linarith
 
+/-- **Cauchy–Schwarz with a coefficient**: `errC a ≤ K·t²√(m_a n_a) + 4m_a/t` gives the level bound
+with the same `K` in front of the `√` term.  `errors_gather` is the `K = 1` case. -/
+theorem errors_gather_coef {ι : Type*} [Fintype ι] {mC nC errC : ι → ℕ} {t K : ℝ} (hK : 0 ≤ K)
+    (ht : 0 < t)
+    (herr : ∀ i, (errC i : ℝ) ≤
+      K * (t ^ 2 * Real.sqrt ((mC i : ℝ) * (nC i : ℝ))) + 4 * (mC i : ℝ) / t) :
+    (∑ i, (errC i : ℝ)) ≤
+      K * (t ^ 2 * Real.sqrt ((∑ i, (mC i : ℝ)) * (∑ i, (nC i : ℝ)))) +
+        4 * (∑ i, (mC i : ℝ)) / t := by
+  have hcs : (∑ i, Real.sqrt ((mC i : ℝ) * (nC i : ℝ)))
+      ≤ Real.sqrt ((∑ i, (mC i : ℝ)) * (∑ i, (nC i : ℝ))) := by
+    have h1 := Real.sum_sqrt_mul_sqrt_le (Finset.univ)
+      (f := fun i => (mC i : ℝ)) (g := fun i => (nC i : ℝ))
+      (fun i => Nat.cast_nonneg _) (fun i => Nat.cast_nonneg _)
+    calc ∑ i, Real.sqrt ((mC i : ℝ) * (nC i : ℝ))
+        = ∑ i, Real.sqrt (mC i : ℝ) * Real.sqrt (nC i : ℝ) := by
+          refine Finset.sum_congr rfl (fun i _ => ?_)
+          exact Real.sqrt_mul (Nat.cast_nonneg (mC i)) _
+      _ ≤ Real.sqrt (∑ i, (mC i : ℝ)) * Real.sqrt (∑ i, (nC i : ℝ)) := h1
+      _ = Real.sqrt ((∑ i, (mC i : ℝ)) * (∑ i, (nC i : ℝ))) := by
+          rw [Real.sqrt_mul (by positivity)]
+  have hstep : (∑ i, (errC i : ℝ))
+      ≤ ∑ i, (K * (t ^ 2 * Real.sqrt ((mC i : ℝ) * (nC i : ℝ))) + 4 * (mC i : ℝ) / t) :=
+    Finset.sum_le_sum (fun i _ => herr i)
+  have hsplit : (∑ i, (K * (t ^ 2 * Real.sqrt ((mC i : ℝ) * (nC i : ℝ))) +
+        4 * (mC i : ℝ) / t))
+      = K * (t ^ 2 * (∑ i, Real.sqrt ((mC i : ℝ) * (nC i : ℝ)))) +
+        4 * (∑ i, (mC i : ℝ)) / t := by
+    rw [Finset.sum_add_distrib]
+    congr 1
+    · rw [← Finset.mul_sum]
+      congr 1
+      rw [Finset.mul_sum]
+    · rw [Finset.mul_sum, ← Finset.sum_div]
+  have hmono : K * (t ^ 2 * (∑ i, Real.sqrt ((mC i : ℝ) * (nC i : ℝ)))) ≤
+      K * (t ^ 2 * Real.sqrt ((∑ i, (mC i : ℝ)) * (∑ i, (nC i : ℝ)))) :=
+    mul_le_mul_of_nonneg_left (mul_le_mul_of_nonneg_left hcs (by positivity)) hK
+  rw [hsplit] at hstep
+  linarith
+
 /-- **The same for the edges handed to children**: per call at most `4m_c/t`, so the level total is
 at most `4m_d/t`. -/
 theorem inputs_gather {ι : Type*} [Fintype ι] {mC inC : ι → ℕ} {t : ℝ}
@@ -296,6 +375,31 @@ theorem Level.errors_le {t : ℝ} (ht : 0 < t) (L : Level V E) (errF : Inst V E 
       t ^ 2 * Real.sqrt ((L.edges : ℝ) * (L.verts : ℝ)) + 4 * (L.edges : ℝ) / t := by
   have hg := errors_gather (ι := ↥L.insts) (mC := fun a => a.1.2.card)
     (nC := fun a => a.1.1.card) (errC := fun a => errF a.1) ht (fun a => h a.1 a.2)
+  have hm : (∑ i : ↥L.insts, (i.1.2.card : ℝ)) = (L.edges : ℝ) := by
+    have h1 : (∑ i : ↥L.insts, (i.1.2.card : ℝ)) = ∑ a ∈ L.insts, (a.2.card : ℝ) := by
+      rw [Finset.univ_eq_attach]
+      exact Finset.sum_attach (s := L.insts) (f := fun a : Inst V E => (a.2.card : ℝ))
+    rw [h1, Level.edges, Nat.cast_sum]
+  have hn : (∑ i : ↥L.insts, (i.1.1.card : ℝ)) = (L.verts : ℝ) := by
+    have h1 : (∑ i : ↥L.insts, (i.1.1.card : ℝ)) = ∑ a ∈ L.insts, (a.1.card : ℝ) := by
+      rw [Finset.univ_eq_attach]
+      exact Finset.sum_attach (s := L.insts) (f := fun a : Inst V E => (a.1.card : ℝ))
+    rw [h1, Level.verts, Nat.cast_sum]
+  have h2 : (∑ i : ↥L.insts, (errF i.1 : ℝ)) = ∑ a ∈ L.insts, (errF a : ℝ) := by
+    rw [Finset.univ_eq_attach]
+    exact Finset.sum_attach (s := L.insts) (f := fun a : Inst V E => (errF a : ℝ))
+  rw [hm, hn, h2] at hg
+  exact hg
+
+/-- **`Level.errors_le` with the `t²√(m_a n_a)` coefficient open.** -/
+theorem Level.errors_le_coef {t K : ℝ} (hK : 0 ≤ K) (ht : 0 < t) (L : Level V E)
+    (errF : Inst V E → ℕ)
+    (h : ∀ a ∈ L.insts, (errF a : ℝ) ≤
+      K * (t ^ 2 * Real.sqrt ((a.2.card : ℝ) * (a.1.card : ℝ))) + 4 * (a.2.card : ℝ) / t) :
+    (∑ a ∈ L.insts, (errF a : ℝ)) ≤
+      K * (t ^ 2 * Real.sqrt ((L.edges : ℝ) * (L.verts : ℝ))) + 4 * (L.edges : ℝ) / t := by
+  have hg := errors_gather_coef (ι := ↥L.insts) (mC := fun a => a.1.2.card)
+    (nC := fun a => a.1.1.card) (errC := fun a => errF a.1) hK ht (fun a => h a.1 a.2)
   have hm : (∑ i : ↥L.insts, (i.1.2.card : ℝ)) = (L.edges : ℝ) := by
     have h1 : (∑ i : ↥L.insts, (i.1.2.card : ℝ)) = ∑ a ∈ L.insts, (a.2.card : ℝ) := by
       rw [Finset.univ_eq_attach]
@@ -342,6 +446,15 @@ theorem Level.inputs_le_err {t C : ℝ} (L : Level V E) (errF inF : Inst V E →
       C * (t ^ 2 * (L.verts : ℝ)) := by
   refine le_trans (Finset.sum_le_sum h) (le_of_eq ?_)
   rw [Finset.sum_add_distrib, ← Finset.mul_sum, ← Finset.mul_sum, Level.verts, Nat.cast_sum]
+
+/-- **The per-instance input bound with a level-dependent coefficient.**  Same gathering as
+`Level.inputs_le_err`, with the coefficient `c` open: the procedure's honest extra is
+`A·(d+1)²¹·n_a` (the `t·r²` term, degree `21` in the level), which no constant `C·t²` can absorb. -/
+theorem Level.inputs_le_coef {c : ℝ} (L : Level V E) (errF inF : Inst V E → ℕ)
+    (h : ∀ a ∈ L.insts, (inF a : ℝ) ≤ (errF a : ℝ) + c * (a.1.card : ℝ)) :
+    (∑ a ∈ L.insts, (inF a : ℝ)) ≤ (∑ a ∈ L.insts, (errF a : ℝ)) + c * (L.verts : ℝ) := by
+  refine le_trans (Finset.sum_le_sum h) (le_of_eq ?_)
+  rw [Finset.sum_add_distrib, Level.verts, Nat.cast_sum, ← Finset.mul_sum]
 
 /-! ## 4. The `hrest` account of §3.6, and the display at the root -/
 
@@ -512,6 +625,194 @@ theorem display_of_callout_rest {ι : Type*} [Fintype ι] (O : CallOut G ι) {γ
     hγ hε hγε (by positivity) hnm (by exact_mod_cast O.hFcard)
     (hrest_of_levels_rest (n := O.P.card) (m := O.E₀.card) hγ hC hstep hn0 hm0 herr hin hnm
       hU hSE)
+
+/-- **§3.6's error account with the paper's `t·r²` term.**  Per level `d` the child inputs satisfy
+`inL d ≤ errL d + A(d+1)²¹·n_d` (the honest `2t²(n−1) + t(n−1+r²n)` at `t = γ(d+1)³`, `r = 8t³`,
+with `A` absorbing `2γ²`, `γ`, `64γ⁷`).  The degree-`21` piece still decays geometrically
+(`Section36.errors_levels_poly`), at the price of the large constant `202²¹·2` and the linear `n`:
+
+`U + SE ≤ γ²·80000·√(mn) + 16m/γ + A·202²¹·2·n`. -/
+theorem hrest_of_levels_poly {n m : ℕ} {γ A : ℝ} (hγ : 0 < γ) (hA : 0 ≤ A) {D : ℕ}
+    {L : ℕ → Level V E}
+    (hstep : ∀ d, Step (L d) (L (d + 1))) (hn0 : (L 0).verts = n) (hm0 : (L 0).edges = m)
+    {errL inL : ℕ → ℕ}
+    (herr : ∀ d ∈ Finset.range D, (errL d : ℝ) ≤
+      (γ * ((d : ℝ) + 1) ^ 3) ^ 2 * Real.sqrt (((L d).edges : ℝ) * ((L d).verts : ℝ)) +
+        4 * ((L d).edges : ℝ) / (γ * ((d : ℝ) + 1) ^ 3))
+    (hin : ∀ d ∈ Finset.range D, (inL d : ℝ) ≤ (errL d : ℝ) +
+      A * ((d : ℝ) + 1) ^ 21 * ((L d).verts : ℝ))
+    {U SE : ℕ} (hU : U ≤ ∑ d ∈ Finset.range D, errL d)
+    (hSE : SE ≤ ∑ d ∈ Finset.range D, inL d) :
+    (U : ℝ) + (SE : ℝ) ≤
+      γ ^ 2 * 80000 * Real.sqrt ((m : ℝ) * (n : ℝ)) + 16 * (m : ℝ) / γ +
+        A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) := by
+  have hbase := errors_levels_poly (n := n) (m := m) (γ := γ) (A := A) hγ hA (D := D)
+    (nL := fun d => (L d).verts) (mL := fun d => (L d).edges) (errL := errL) (inL := inL)
+    (fun d _ => by exact_mod_cast LevelChain.verts hstep hn0 d)
+    (fun d _ => by exact_mod_cast LevelChain.edges hstep hm0 d) herr hin
+  have hbase' : ((∑ d ∈ Finset.range D, (errL d : ℝ)) + ∑ d ∈ Finset.range D, (inL d : ℝ)) ≤
+      γ ^ 2 * 80000 * Real.sqrt ((m : ℝ) * (n : ℝ)) + 16 * (m : ℝ) / γ +
+        A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) := by
+    have h := hbase
+    rw [show γ ^ 2 * 40000 * 2 * Real.sqrt ((m : ℝ) * (n : ℝ))
+        = γ ^ 2 * 80000 * Real.sqrt ((m : ℝ) * (n : ℝ)) by ring] at h
+    exact h
+  have h1 : (U : ℝ) ≤ (∑ d ∈ Finset.range D, (errL d : ℝ)) := by exact_mod_cast hU
+  have h2 : (SE : ℝ) ≤ (∑ d ∈ Finset.range D, (inL d : ℝ)) := by exact_mod_cast hSE
+  linarith
+
+/-- **§3.6 from per-instance data, with the paper's `t·r²` term.**  The two per-call hypotheses are
+stated for every instance of every level: `errF a ≤ t_d²√(m_a n_a) + 4m_a/t_d` and
+`inF a ≤ errF a + A(d+1)²¹·n_a`.  Gathering with `Level.errors_le` and `Level.inputs_le_coef` and
+summing with `hrest_of_levels_poly` gives the root account — no per-level hypothesis is left. -/
+theorem hrest_of_instances_poly {n m : ℕ} {γ A : ℝ} (hγ : 0 < γ) (hA : 0 ≤ A) {D : ℕ}
+    {L : ℕ → Level V E}
+    (hstep : ∀ d, Step (L d) (L (d + 1))) (hn0 : (L 0).verts = n) (hm0 : (L 0).edges = m)
+    {errF inF : Inst V E → ℕ}
+    (herr : ∀ d ∈ Finset.range D, ∀ a ∈ (L d).insts, (errF a : ℝ) ≤
+      (γ * ((d : ℝ) + 1) ^ 3) ^ 2 * Real.sqrt ((a.2.card : ℝ) * (a.1.card : ℝ)) +
+        4 * (a.2.card : ℝ) / (γ * ((d : ℝ) + 1) ^ 3))
+    (hin : ∀ d ∈ Finset.range D, ∀ a ∈ (L d).insts, (inF a : ℝ) ≤ (errF a : ℝ) +
+      A * ((d : ℝ) + 1) ^ 21 * (a.1.card : ℝ))
+    {U SE : ℕ} (hU : U ≤ ∑ d ∈ Finset.range D, ∑ a ∈ (L d).insts, errF a)
+    (hSE : SE ≤ ∑ d ∈ Finset.range D, ∑ a ∈ (L d).insts, inF a) :
+    (U : ℝ) + (SE : ℝ) ≤
+      γ ^ 2 * 80000 * Real.sqrt ((m : ℝ) * (n : ℝ)) + 16 * (m : ℝ) / γ +
+        A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) := by
+  have hn' : ∀ d ∈ Finset.range D,
+      ((∑ a ∈ (L d).insts, errF a : ℕ) : ℝ) ≤
+        (γ * ((d : ℝ) + 1) ^ 3) ^ 2 *
+            Real.sqrt (((L d).edges : ℝ) * ((L d).verts : ℝ)) +
+          4 * ((L d).edges : ℝ) / (γ * ((d : ℝ) + 1) ^ 3) := by
+    intro d hd
+    rw [Nat.cast_sum]
+    exact Level.errors_le (t := γ * ((d : ℝ) + 1) ^ 3) (by positivity) (L d) errF
+      (fun a ha => herr d hd a ha)
+  have hi' : ∀ d ∈ Finset.range D,
+      ((∑ a ∈ (L d).insts, inF a : ℕ) : ℝ) ≤
+        ((∑ a ∈ (L d).insts, errF a : ℕ) : ℝ) +
+          A * ((d : ℝ) + 1) ^ 21 * ((L d).verts : ℝ) := by
+    intro d hd
+    rw [Nat.cast_sum, Nat.cast_sum]
+    exact Level.inputs_le_coef (L d) errF inF (fun a ha => hin d hd a ha)
+  exact hrest_of_levels_poly (n := n) (m := m) hγ hA hstep hn0 hm0 hn' hi' hU hSE
+
+/-- **The root's display with the paper's `t·r²` term**, `A` open: the constant is
+`C_ε = √2 + γ²·80000 + √2·A·202²¹·2`. -/
+theorem display_of_callout_poly {ι : Type*} [Fintype ι] (O : CallOut G ι) {γ ε A : ℝ}
+    (hγ : 0 < γ) (hε : 0 < ε) (hγε : 16 ≤ ε * γ) (hA : 0 ≤ A)
+    (hnm : (O.P.card : ℝ) ≤ 2 * (O.E₀.card : ℝ))
+    {D : ℕ} {L : ℕ → Level V E} (hstep : ∀ d, Step (L d) (L (d + 1)))
+    (hn0 : (L 0).verts = O.P.card) (hm0 : (L 0).edges = O.E₀.card)
+    {errL inL : ℕ → ℕ}
+    (herr : ∀ d ∈ Finset.range D, (errL d : ℝ) ≤
+      (γ * ((d : ℝ) + 1) ^ 3) ^ 2 * Real.sqrt (((L d).edges : ℝ) * ((L d).verts : ℝ)) +
+        4 * ((L d).edges : ℝ) / (γ * ((d : ℝ) + 1) ^ 3))
+    (hin : ∀ d ∈ Finset.range D, (inL d : ℝ) ≤ (errL d : ℝ) +
+      A * ((d : ℝ) + 1) ^ 21 * ((L d).verts : ℝ))
+    (hU : (O.U).card ≤ ∑ d ∈ Finset.range D, errL d)
+    (hSE : ∑ i, (O.kidE i).card ≤ ∑ d ∈ Finset.range D, inL d) :
+    (O.F.card : ℝ) + ((O.U).card : ℝ) + ((∑ i, (O.kidE i).card : ℕ) : ℝ) ≤
+      ε * (O.E₀.card : ℝ) +
+        (Real.sqrt 2 + γ ^ 2 * 80000 + Real.sqrt 2 * (A * ((202 : ℝ) ^ 21 * 2))) *
+          Real.sqrt ((O.E₀.card : ℝ) * (O.P.card : ℝ)) :=
+  lemma12_bound_extra (n := O.P.card) (m := O.E₀.card) (Fc := O.F.card)
+    (U := (O.U).card) (SE := ∑ i, (O.kidE i).card) (K := 80000)
+    (E := A * ((202 : ℝ) ^ 21 * 2)) hγ hε hγε (by norm_num) (by positivity) hnm
+    (by exact_mod_cast O.hFcard)
+    (hrest_of_levels_poly (n := O.P.card) (m := O.E₀.card) hγ hA hstep hn0 hm0 herr hin hU hSE)
+
+/-- **§3.6's error account with the `t²√(m_cn_c)` coefficient open.**  Per level
+`errL d ≤ K·t_d²√(m_d n_d) + 4m_d/t_d`, `inL d ≤ errL d + A(d+1)²¹·n_d`; the level sum is
+`γ²·80000·K·√(mn) + 16m/γ + A·202²¹·2·n`.  `K = 10` is the paper's true constant
+(`Section36.error_count_le`), `K = 1` the `errors_levels_poly` special case. -/
+theorem hrest_of_levels_poly_coef {n m : ℕ} {γ A K : ℝ} (hγ : 0 < γ) (hA : 0 ≤ A) (hK : 0 ≤ K)
+    {D : ℕ} {L : ℕ → Level V E}
+    (hstep : ∀ d, Step (L d) (L (d + 1))) (hn0 : (L 0).verts = n) (hm0 : (L 0).edges = m)
+    {errL inL : ℕ → ℕ}
+    (herr : ∀ d ∈ Finset.range D, (errL d : ℝ) ≤
+      K * ((γ * ((d : ℝ) + 1) ^ 3) ^ 2 * Real.sqrt (((L d).edges : ℝ) * ((L d).verts : ℝ))) +
+        4 * ((L d).edges : ℝ) / (γ * ((d : ℝ) + 1) ^ 3))
+    (hin : ∀ d ∈ Finset.range D, (inL d : ℝ) ≤ (errL d : ℝ) +
+      A * ((d : ℝ) + 1) ^ 21 * ((L d).verts : ℝ))
+    {U SE : ℕ} (hU : U ≤ ∑ d ∈ Finset.range D, errL d)
+    (hSE : SE ≤ ∑ d ∈ Finset.range D, inL d) :
+    (U : ℝ) + (SE : ℝ) ≤
+      γ ^ 2 * (80000 * K) * Real.sqrt ((m : ℝ) * (n : ℝ)) + 16 * (m : ℝ) / γ +
+        A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) := by
+  have hbase := errors_levels_poly_coef (n := n) (m := m) (γ := γ) (A := A) (K := K) hγ hA hK
+    (D := D) (nL := fun d => (L d).verts) (mL := fun d => (L d).edges) (errL := errL) (inL := inL)
+    (fun d _ => by exact_mod_cast LevelChain.verts hstep hn0 d)
+    (fun d _ => by exact_mod_cast LevelChain.edges hstep hm0 d) herr hin
+  have hbase' : ((∑ d ∈ Finset.range D, (errL d : ℝ)) + ∑ d ∈ Finset.range D, (inL d : ℝ)) ≤
+      γ ^ 2 * (80000 * K) * Real.sqrt ((m : ℝ) * (n : ℝ)) + 16 * (m : ℝ) / γ +
+        A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) := by
+    have h := hbase
+    rw [show γ ^ 2 * 40000 * K * 2 * Real.sqrt ((m : ℝ) * (n : ℝ))
+        = γ ^ 2 * (80000 * K) * Real.sqrt ((m : ℝ) * (n : ℝ)) by ring] at h
+    exact h
+  have h1 : (U : ℝ) ≤ (∑ d ∈ Finset.range D, (errL d : ℝ)) := by exact_mod_cast hU
+  have h2 : (SE : ℝ) ≤ (∑ d ∈ Finset.range D, (inL d : ℝ)) := by exact_mod_cast hSE
+  linarith
+
+/-- **§3.6 from per-instance data, `K` and `A` both open.**  Premises only at the instance level:
+`errF a ≤ K·t_d²√(m_a n_a) + 4m_a/t_d`, `inF a ≤ errF a + A(d+1)²¹·n_a`. -/
+theorem hrest_of_instances_poly_coef {n m : ℕ} {γ A K : ℝ} (hγ : 0 < γ) (hA : 0 ≤ A) (hK : 0 ≤ K)
+    {D : ℕ} {L : ℕ → Level V E}
+    (hstep : ∀ d, Step (L d) (L (d + 1))) (hn0 : (L 0).verts = n) (hm0 : (L 0).edges = m)
+    {errF inF : Inst V E → ℕ}
+    (herr : ∀ d ∈ Finset.range D, ∀ a ∈ (L d).insts, (errF a : ℝ) ≤
+      K * ((γ * ((d : ℝ) + 1) ^ 3) ^ 2 * Real.sqrt ((a.2.card : ℝ) * (a.1.card : ℝ))) +
+        4 * (a.2.card : ℝ) / (γ * ((d : ℝ) + 1) ^ 3))
+    (hin : ∀ d ∈ Finset.range D, ∀ a ∈ (L d).insts, (inF a : ℝ) ≤ (errF a : ℝ) +
+      A * ((d : ℝ) + 1) ^ 21 * (a.1.card : ℝ))
+    {U SE : ℕ} (hU : U ≤ ∑ d ∈ Finset.range D, ∑ a ∈ (L d).insts, errF a)
+    (hSE : SE ≤ ∑ d ∈ Finset.range D, ∑ a ∈ (L d).insts, inF a) :
+    (U : ℝ) + (SE : ℝ) ≤
+      γ ^ 2 * (80000 * K) * Real.sqrt ((m : ℝ) * (n : ℝ)) + 16 * (m : ℝ) / γ +
+        A * ((202 : ℝ) ^ 21 * 2) * (n : ℝ) := by
+  have hn' : ∀ d ∈ Finset.range D,
+      ((∑ a ∈ (L d).insts, errF a : ℕ) : ℝ) ≤
+        K * ((γ * ((d : ℝ) + 1) ^ 3) ^ 2 *
+            Real.sqrt (((L d).edges : ℝ) * ((L d).verts : ℝ))) +
+          4 * ((L d).edges : ℝ) / (γ * ((d : ℝ) + 1) ^ 3) := by
+    intro d hd
+    rw [Nat.cast_sum]
+    exact Level.errors_le_coef (K := K) (t := γ * ((d : ℝ) + 1) ^ 3) hK (by positivity) (L d) errF
+      (fun a ha => herr d hd a ha)
+  have hi' : ∀ d ∈ Finset.range D,
+      ((∑ a ∈ (L d).insts, inF a : ℕ) : ℝ) ≤
+        ((∑ a ∈ (L d).insts, errF a : ℕ) : ℝ) +
+          A * ((d : ℝ) + 1) ^ 21 * ((L d).verts : ℝ) := by
+    intro d hd
+    rw [Nat.cast_sum, Nat.cast_sum]
+    exact Level.inputs_le_coef (L d) errF inF (fun a ha => hin d hd a ha)
+  exact hrest_of_levels_poly_coef (n := n) (m := m) hγ hA hK hstep hn0 hm0 hn' hi' hU hSE
+
+set_option maxHeartbeats 1000000 in
+/-- **The root's display with both constants open**: `C_ε = √2 + γ²·80000·K + √2·A·202²¹·2`. -/
+theorem display_of_callout_poly_coef {ι : Type*} [Fintype ι] (O : CallOut G ι) {γ ε A K : ℝ}
+    (hγ : 0 < γ) (hε : 0 < ε) (hγε : 16 ≤ ε * γ) (hA : 0 ≤ A) (hK : 0 ≤ K)
+    (hnm : (O.P.card : ℝ) ≤ 2 * (O.E₀.card : ℝ))
+    {D : ℕ} {L : ℕ → Level V E} (hstep : ∀ d, Step (L d) (L (d + 1)))
+    (hn0 : (L 0).verts = O.P.card) (hm0 : (L 0).edges = O.E₀.card)
+    {errL inL : ℕ → ℕ}
+    (herr : ∀ d ∈ Finset.range D, (errL d : ℝ) ≤
+      K * ((γ * ((d : ℝ) + 1) ^ 3) ^ 2 * Real.sqrt (((L d).edges : ℝ) * ((L d).verts : ℝ))) +
+        4 * ((L d).edges : ℝ) / (γ * ((d : ℝ) + 1) ^ 3))
+    (hin : ∀ d ∈ Finset.range D, (inL d : ℝ) ≤ (errL d : ℝ) +
+      A * ((d : ℝ) + 1) ^ 21 * ((L d).verts : ℝ))
+    (hU : (O.U).card ≤ ∑ d ∈ Finset.range D, errL d)
+    (hSE : ∑ i, (O.kidE i).card ≤ ∑ d ∈ Finset.range D, inL d) :
+    (O.F.card : ℝ) + ((O.U).card : ℝ) + ((∑ i, (O.kidE i).card : ℕ) : ℝ) ≤
+      ε * (O.E₀.card : ℝ) +
+        (Real.sqrt 2 + γ ^ 2 * (80000 * K) + Real.sqrt 2 * (A * ((202 : ℝ) ^ 21 * 2))) *
+          Real.sqrt ((O.E₀.card : ℝ) * (O.P.card : ℝ)) :=
+  lemma12_bound_extra (n := O.P.card) (m := O.E₀.card) (Fc := O.F.card)
+    (U := (O.U).card) (SE := ∑ i, (O.kidE i).card) (K := 80000 * K)
+    (E := A * ((202 : ℝ) ^ 21 * 2)) hγ hε hγε (by positivity) (by positivity) hnm
+    (by exact_mod_cast O.hFcard)
+    (hrest_of_levels_poly_coef (n := O.P.card) (m := O.E₀.card) hγ hA hK hstep hn0 hm0 herr hin hU hSE)
 
 /-! ## 5. The comparisons account of §3.6 -/
 
@@ -748,15 +1049,15 @@ end Step
 namespace CallOut
 
 /-- **A call, from its classification.**  `F` is the forest the call returns, `P'` the portal set
-shared by the `#ι` children, and `cls` sends each input edge to `none` (kept in `F` or `U(F)`) or to
-the child that receives it.  The portal budget `4·#ι·|P'| ≤ |P|` is the paper's `t²·2nt/r = n/4`.
-Every field is then the definition's own bookkeeping, so a procedure need only produce
-`(F, P', cls)`. -/
-def ofClass {ι : Type*} [Fintype ι] [DecidableEq ι]
+shared by the `#ι` children, and `cls` sends each input edge to `some i` (the child that receives
+it) or to `none`.  A `none` edge is kept, retained, or — if the forest already supports it —
+**discarded**: that is `drop`, the paper's "filter out every supported edge outside `F`".  The portal
+budget `4·#ι·|P'| ≤ |P|` is the paper's `t²·2nt/r = n/4`.  Every other field is the definition's
+own bookkeeping, so a procedure need only produce `(F, P', cls)`. -/
+noncomputable def ofClass {ι : Type*} [Fintype ι] [DecidableEq ι]
     (P : Finset V) (E₀ : Finset E) (F : Finset E) (P' : Finset V) (cls : E → Option ι)
     (hFsub : F ⊆ E₀) (hforest : IsForest G F) (hFcard : F.card ≤ P.card)
     (hP' : P' ⊆ P) (hbudget : 4 * (Fintype.card ι * P'.card) ≤ P.card)
-    (hkeep : ∀ e ∈ E₀, cls e = none → e ∈ F ∨ e ∈ unsupp G F)
     (hmove : ∀ e ∈ E₀, ∀ i, cls e = some i → e ∉ F ∧ e ∉ unsupp G F) :
     CallOut G ι where
   P := P
@@ -764,6 +1065,7 @@ def ofClass {ι : Type*} [Fintype ι] [DecidableEq ι]
   F := F
   kidE := fun i => E₀.filter (fun e => cls e = some i)
   kidV := fun _ => P'
+  drop := E₀.filter (fun e => cls e = none ∧ e ∉ F ∧ e ∉ unsupp G F)
   hFsub := hFsub
   hforest := hforest
   hFcard := hFcard
@@ -786,14 +1088,38 @@ def ofClass {ι : Type*} [Fintype ι] [DecidableEq ι]
     intro e heU hkid
     have he : e ∈ E₀ := (Finset.mem_inter.mp heU).2
     exact (hmove e he i (Finset.mem_filter.mp hkid).2).2 (Finset.mem_inter.mp heU).1
+  hdropE := fun _ he => (Finset.mem_filter.mp he).1
+  hdrop_supp := by
+    intro e he
+    obtain ⟨-, -, -, hnu⟩ := Finset.mem_filter.mp he
+    by_contra h
+    exact hnu (mem_unsupp.mpr h)
+  hFdrop := by
+    rw [Finset.disjoint_left]
+    intro e heF hd
+    exact (Finset.mem_filter.mp hd).2.2.1 heF
+  hUdrop := by
+    rw [Finset.disjoint_left]
+    intro e heU hd
+    exact (Finset.mem_filter.mp hd).2.2.2 (Finset.mem_inter.mp heU).1
+  hkid_drop := by
+    intro i
+    rw [Finset.disjoint_left]
+    intro e hk hd
+    have h1 := (Finset.mem_filter.mp hk).2
+    have h2 := (Finset.mem_filter.mp hd).2.1
+    rw [h2] at h1
+    exact absurd h1 (by simp)
   hcover := by
     intro e he
     cases hcl : cls e with
     | none =>
-        rcases hkeep e he hcl with hF | hU
+        by_cases hF : e ∈ F
         · exact Or.inl hF
-        · exact Or.inr (Or.inl hU)
-    | some i => exact Or.inr (Or.inr ⟨i, Finset.mem_filter.mpr ⟨he, hcl⟩⟩)
+        · by_cases hU : e ∈ unsupp G F
+          · exact Or.inr (Or.inl hU)
+          · exact Or.inr (Or.inr (Or.inl (Finset.mem_filter.mpr ⟨he, hcl, hF, hU⟩)))
+    | some i => exact Or.inr (Or.inr (Or.inr ⟨i, Finset.mem_filter.mpr ⟨he, hcl⟩⟩))
   hshrink := by
     have hsum : (∑ _i : ι, P'.card) = Fintype.card ι * P'.card := by
       simp [Finset.sum_const, smul_eq_mul]
@@ -811,6 +1137,7 @@ def ofForest (P : Finset V) (E₀ : Finset E) {F : Finset E}
   F := F
   kidE := fun i => Empty.elim i
   kidV := fun i => Empty.elim i
+  drop := ∅
   hFsub := hFsub
   hforest := hforest
   hFcard := hFcard
@@ -819,6 +1146,11 @@ def ofForest (P : Finset V) (E₀ : Finset E) {F : Finset E}
   hkidEdisj := fun i => Empty.elim i
   hFkid := fun i => Empty.elim i
   hUkid := fun i => Empty.elim i
+  hdropE := Finset.empty_subset _
+  hdrop_supp := by simp
+  hFdrop := by simp
+  hUdrop := by simp
+  hkid_drop := fun i => Empty.elim i
   hcover := fun e he => by
     rcases hcover e he with h | h
     · exact Or.inl h
@@ -833,8 +1165,8 @@ theorem nonempty_of_isForest (P : Finset V) (E₀ : Finset E) (h : IsForest G E�
 /-- **A call exists for any interior forest.**  Given any subforest `F ⊆ E₀` with `|F| ≤ |P|`, any
 portal set `P' ⊆ P` and any inhabited child type satisfying the budget `4·#ι·|P'| ≤ |P|`, a call
 exists: put every edge of `E₀` that is neither in `F` nor unsupported into the distinguished child
-`default`, so all other children receive nothing.  The packaging itself never obstructs — the only
-content of a call is the choice of `F` (the rounds) and of the numbers. -/
+`default`, so all other children receive nothing and nothing is discarded.  The packaging itself
+never obstructs — the only content of a call is the choice of `F` (the rounds) and of the numbers. -/
 theorem nonempty_of_subforest {ι : Type*} [Fintype ι] [DecidableEq ι] [Inhabited ι]
     (P : Finset V) (E₀ : Finset E) {F : Finset E} {P' : Finset V}
     (hFsub : F ⊆ E₀) (hforest : IsForest G F) (hFcard : F.card ≤ P.card)
@@ -842,16 +1174,12 @@ theorem nonempty_of_subforest {ι : Type*} [Fintype ι] [DecidableEq ι] [Inhabi
     Nonempty (CallOut G ι) := by
   classical
   refine ⟨ofClass P E₀ F P' (fun e => if e ∈ F ∨ e ∈ unsupp G F then none else some default)
-    hFsub hforest hFcard hP' hbudget ?_ ?_⟩
-  · intro e _ hcl
-    by_contra h
-    rw [ite_eq_right h] at hcl
+    hFsub hforest hFcard hP' hbudget ?_⟩
+  intro e _ i hcl
+  by_cases h : e ∈ F ∨ e ∈ unsupp G F
+  · rw [ite_eq_left h] at hcl
     exact absurd hcl (by simp)
-  · intro e _ i hcl
-    by_cases h : e ∈ F ∨ e ∈ unsupp G F
-    · rw [ite_eq_left h] at hcl
-      exact absurd hcl (by simp)
-    · exact not_or.mp h
+  · exact not_or.mp h
 
 /-- **`ofClass` keeps `F` away from every child.**  `hmove` says a classified edge lies in neither
 `F` nor `U(F)`, so every edge of `F` stays out of all children: the edge the recursion leaves
@@ -860,10 +1188,9 @@ theorem ofClass_kidE_not_mem {ι : Type*} [Fintype ι] [DecidableEq ι]
     {P : Finset V} {E₀ : Finset E} {F : Finset E} {P' : Finset V} {cls : E → Option ι}
     {hFsub : F ⊆ E₀} {hforest : IsForest G F} {hFcard : F.card ≤ P.card} {hP' : P' ⊆ P}
     {hbudget : 4 * (Fintype.card ι * P'.card) ≤ P.card}
-    {hkeep : ∀ e ∈ E₀, cls e = none → e ∈ F ∨ e ∈ unsupp G F}
     {hmove : ∀ e ∈ E₀, ∀ i, cls e = some i → e ∉ F ∧ e ∉ unsupp G F}
     {e : E} (heF : e ∈ F) (i : ι) :
-    e ∉ (ofClass P E₀ F P' cls hFsub hforest hFcard hP' hbudget hkeep hmove).kidE i := by
+    e ∉ (ofClass P E₀ F P' cls hFsub hforest hFcard hP' hbudget hmove).kidE i := by
   intro hmem
   exact (hmove e (hFsub heF) i (Finset.mem_filter.mp hmem).2).1 heF
 
@@ -965,6 +1292,7 @@ noncomputable def leafOut (P : Finset V) : CallOut G (Fin 0) where
   F := ∅
   kidE := fun i => i.elim0
   kidV := fun i => i.elim0
+  drop := ∅
   hFsub := Finset.empty_subset _
   hforest := IsForest.empty
   hFcard := by simp
@@ -973,6 +1301,11 @@ noncomputable def leafOut (P : Finset V) : CallOut G (Fin 0) where
   hkidEdisj := fun i => i.elim0
   hFkid := fun i => i.elim0
   hUkid := fun i => i.elim0
+  hdropE := Finset.empty_subset _
+  hdrop_supp := by simp
+  hFdrop := by simp
+  hUdrop := by simp
+  hkid_drop := fun i => i.elim0
   hcover := fun e he => by simp at he
   hshrink := by simp
 
@@ -1207,13 +1540,13 @@ theorem chain_edges_succ (P : Finset V) (E₀ : Finset E) (S : Strategy G) (hS :
   exact Finset.card_biUnion (fun i _ j _ hij => (S a.1 a.2).2.hkidEdisj i j hij)
 
 /-- **Every edge is accounted exactly once** (the telescoping identity): at every level an edge is
-either kept in a call's forest, or becomes unsupported at that level; the levels partition `E₀` down
-to whatever edge set survives to depth `D`.  So the sum of `|F| + |U(F)|` over the first `D` levels
-plus the edges still alive at depth `D` is `|E₀|` — with a terminating strategy (`D = |E₀| + 1`,
-`chain_insts_empty_at`) nothing survives. -/
+kept in a call's forest, becomes unsupported at that level, or is discarded as supported; the levels
+partition `E₀` down to whatever edge set survives to depth `D`.  So the sum of
+`|F| + |U(F)| + |drop|` over the first `D` levels plus the edges still alive at depth `D` is
+`|E₀|` — with a terminating strategy (`D = |E₀| + 1`, `chain_insts_empty_at`) nothing survives. -/
 theorem kept_telescope (P : Finset V) (E₀ : Finset E) (S : Strategy G) (hS : Strategy.Wf S) :
     ∀ D : ℕ, (∑ d ∈ Finset.range D, ∑ a ∈ (Level.chain P E₀ S hS d).insts,
-        ((S a.1 a.2).2.F.card + (S a.1 a.2).2.U.card)) +
+        ((S a.1 a.2).2.F.card + (S a.1 a.2).2.U.card + (S a.1 a.2).2.drop.card)) +
       (Level.chain P E₀ S hS D).edges = E₀.card := by
   intro D
   induction D with
@@ -1221,14 +1554,14 @@ theorem kept_telescope (P : Finset V) (E₀ : Finset E) (S : Strategy G) (hS : S
   | succ D ih =>
       have hstep := chain_edges_succ P E₀ S hS D
       have hpart : ∀ a ∈ (Level.chain P E₀ S hS D).insts,
-          (S a.1 a.2).2.F.card + (S a.1 a.2).2.U.card +
+          (S a.1 a.2).2.F.card + (S a.1 a.2).2.U.card + (S a.1 a.2).2.drop.card +
             ∑ i, ((S a.1 a.2).2.kidE i).card = a.2.card := by
         intro a _
         have h := CallOut.partition_eq (S a.1 a.2).2
         rw [(hS a.1 a.2).2] at h
         exact h
       have hsum : (∑ a ∈ (Level.chain P E₀ S hS D).insts,
-            ((S a.1 a.2).2.F.card + (S a.1 a.2).2.U.card))
+            ((S a.1 a.2).2.F.card + (S a.1 a.2).2.U.card + (S a.1 a.2).2.drop.card))
           + ∑ a ∈ (Level.chain P E₀ S hS D).insts, ∑ i, ((S a.1 a.2).2.kidE i).card
           = (Level.chain P E₀ S hS D).edges := by
         rw [← Finset.sum_add_distrib, Level.edges]
@@ -1237,19 +1570,35 @@ theorem kept_telescope (P : Finset V) (E₀ : Finset E) (S : Strategy G) (hS : S
       omega
 
 /-- **Every edge is accounted exactly once in a terminating run.**  At depth `|E₀| + 1` nothing
-survives (`chain_insts_empty_at`), so the forest edges kept and the edges rejected to `U(F)` across
-*all* levels add up to exactly `|E₀|`: the paper's "each edge is either taken into some forest or
-declared unsupported, exactly once", read on the strategy that actually runs. -/
+survives (`chain_insts_empty_at`), so the kept, rejected and discarded edges across *all* levels add
+up to exactly `|E₀|`: the paper's "each edge is either taken into some forest, declared unsupported,
+or filtered out as supported, exactly once", read on the strategy that actually runs. -/
 theorem kept_telescope_full (P : Finset V) (E₀ : Finset E) (S : Strategy G)
     (hS : Strategy.Wf S) (hstr : Strategy.Strict S) (hleaf : Strategy.Leaf S) :
     (∑ d ∈ Finset.range (E₀.card + 1), ∑ a ∈ (Level.chain P E₀ S hS d).insts,
-        ((S a.1 a.2).2.F.card + (S a.1 a.2).2.U.card)) = E₀.card := by
+        ((S a.1 a.2).2.F.card + (S a.1 a.2).2.U.card + (S a.1 a.2).2.drop.card)) = E₀.card := by
   have h := kept_telescope P E₀ S hS (E₀.card + 1)
   have h0 : (Level.chain P E₀ S hS (E₀.card + 1)).edges = 0 := by
     rw [Level.edges, chain_insts_empty_at P E₀ S hS hstr hleaf]
     simp
   rw [h0] at h
   simpa using h
+
+/-- **The filtered graph is at most the instance**: `|F| + |U(F)|` summed over a whole terminating
+run is bounded by `|E₀|`, with the discarded supported edges as the only slack.  This is the paper's
+"we recurse on a graph with `|F| + |U(F)|` edges" read on the strategy. -/
+theorem kept_le (P : Finset V) (E₀ : Finset E) (S : Strategy G)
+    (hS : Strategy.Wf S) (hstr : Strategy.Strict S) (hleaf : Strategy.Leaf S) :
+    (∑ d ∈ Finset.range (E₀.card + 1), ∑ a ∈ (Level.chain P E₀ S hS d).insts,
+        ((S a.1 a.2).2.F.card + (S a.1 a.2).2.U.card)) ≤ E₀.card := by
+  have h := kept_telescope_full P E₀ S hS hstr hleaf
+  have hle : (∑ d ∈ Finset.range (E₀.card + 1), ∑ a ∈ (Level.chain P E₀ S hS d).insts,
+        ((S a.1 a.2).2.F.card + (S a.1 a.2).2.U.card)) ≤
+      ∑ d ∈ Finset.range (E₀.card + 1), ∑ a ∈ (Level.chain P E₀ S hS d).insts,
+        ((S a.1 a.2).2.F.card + (S a.1 a.2).2.U.card + (S a.1 a.2).2.drop.card) := by
+    refine Finset.sum_le_sum (fun d _ => Finset.sum_le_sum (fun a _ => ?_))
+    omega
+  omega
 
 end LevelChain
 
@@ -1438,6 +1787,276 @@ theorem display_of_strategy_of_calls_rest (P : Finset V) (E₀ : Finset E) (S : 
       _ ≤ ∑ d ∈ Finset.range (E₀.card + 1),
             ∑ a ∈ (Level.chain P E₀ S hS d).insts, inF a := hle
 
+/-- **The same, with the paper's honest per-call input `t·r²`.**  `hinF` now carries the per-round
+`r²` term at the level's own `t = γ(d+1)³`, with `r = 8t³`, so the coefficient is `A(d+1)²¹` —
+degree `21` in the depth, not a constant times `t²`.  The root display survives at the price of the
+constant `202²¹·2` and a linear-in-`n` term: `C_ε = √2 + γ²·80000 + √2·A·202²¹·2`. -/
+theorem display_of_strategy_of_calls_poly (P : Finset V) (E₀ : Finset E) (S : Strategy G)
+    (hS : Strategy.Wf S)
+    {γ ε A : ℝ} (hγ : 0 < γ) (hε : 0 < ε) (hγε : 16 ≤ ε * γ) (hA : 0 ≤ A)
+    (hnm : ((S P E₀).2.P.card : ℝ) ≤ 2 * ((S P E₀).2.E₀.card : ℝ))
+    (errF inF : Inst V E → ℕ)
+    (herror : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (errF a : ℝ) ≤ (γ * ((d : ℝ) + 1) ^ 3) ^ 2 *
+          Real.sqrt ((a.2.card : ℝ) * (a.1.card : ℝ)) +
+        4 * (a.2.card : ℝ) / (γ * ((d : ℝ) + 1) ^ 3))
+    (hinF : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (inF a : ℝ) ≤ (errF a : ℝ) + A * ((d : ℝ) + 1) ^ 21 * (a.1.card : ℝ))
+    (hUinst : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      ((S a.1 a.2).2.U).card ≤ errF a)
+    (hSEinst : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (∑ i, ((S a.1 a.2).2.kidE i).card) ≤ inF a) :
+    ((S P E₀).2.F.card : ℝ) + (((S P E₀).2.U).card : ℝ) +
+        ((∑ i, ((S P E₀).2.kidE i).card : ℕ) : ℝ) ≤
+      ε * ((S P E₀).2.E₀.card : ℝ) +
+        (Real.sqrt 2 + γ ^ 2 * 80000 + Real.sqrt 2 * (A * ((202 : ℝ) ^ 21 * 2))) *
+          Real.sqrt (((S P E₀).2.E₀.card : ℝ) * ((S P E₀).2.P.card : ℝ)) := by
+  have hroot : (P, E₀) ∈ (Level.chain P E₀ S hS 0).insts := by
+    simp [Level.chain, Level.root]
+  refine display_of_callout_poly (S P E₀).2 hγ hε hγε hA hnm
+    (L := Level.chain P E₀ S hS) (LevelChain.chain_step P E₀ S hS)
+    (by simp [LevelChain.chain_verts, (hS P E₀).1])
+    (by simp [LevelChain.chain_edges, (hS P E₀).2])
+    (errL := fun d => ∑ a ∈ (Level.chain P E₀ S hS d).insts, errF a)
+    (inL := fun d => ∑ a ∈ (Level.chain P E₀ S hS d).insts, inF a)
+    (fun d hd => by
+      rw [Nat.cast_sum]
+      exact Level.errors_le (by positivity) _
+        errF (fun a ha => herror d (Nat.lt_succ_iff.mp (Finset.mem_range.mp hd)) a ha))
+    (fun d hd => by
+      rw [Nat.cast_sum, Nat.cast_sum]
+      exact Level.inputs_le_coef _ errF inF
+        (fun a ha => hinF d (Nat.lt_succ_iff.mp (Finset.mem_range.mp hd)) a ha))
+    ?_ ?_
+  · have hU0 : ((S P E₀).2.U).card ≤ errF (P, E₀) :=
+      hUinst 0 (Nat.zero_le _) (P, E₀) hroot
+    have h0 : (∑ a ∈ (Level.chain P E₀ S hS 0).insts, errF a) = errF (P, E₀) := by
+      simp [Level.chain, Level.root]
+    have hle := Finset.single_le_sum
+      (f := fun d => ∑ a ∈ (Level.chain P E₀ S hS d).insts, errF a)
+      (fun i _ => Nat.zero_le _) (Finset.mem_range.mpr (Nat.succ_pos E₀.card))
+    calc ((S P E₀).2.U).card ≤ errF (P, E₀) := hU0
+      _ = ∑ a ∈ (Level.chain P E₀ S hS 0).insts, errF a := h0.symm
+      _ ≤ ∑ d ∈ Finset.range (E₀.card + 1),
+            ∑ a ∈ (Level.chain P E₀ S hS d).insts, errF a := hle
+  · have hSE0 : (∑ i, ((S P E₀).2.kidE i).card) ≤ inF (P, E₀) :=
+      hSEinst 0 (Nat.zero_le _) (P, E₀) hroot
+    have h0 : (∑ a ∈ (Level.chain P E₀ S hS 0).insts, inF a) = inF (P, E₀) := by
+      simp [Level.chain, Level.root]
+    have hle := Finset.single_le_sum
+      (f := fun d => ∑ a ∈ (Level.chain P E₀ S hS d).insts, inF a)
+      (fun i _ => Nat.zero_le _) (Finset.mem_range.mpr (Nat.succ_pos E₀.card))
+    calc (∑ i, ((S P E₀).2.kidE i).card) ≤ inF (P, E₀) := hSE0
+      _ = ∑ a ∈ (Level.chain P E₀ S hS 0).insts, inF a := h0.symm
+      _ ≤ ∑ d ∈ Finset.range (E₀.card + 1),
+            ∑ a ∈ (Level.chain P E₀ S hS d).insts, inF a := hle
+
+set_option maxHeartbeats 1000000 in
+/-- **The strategy-level display with both coefficients open.**  `herror` carries
+`K·t_d²√(m_an_a)`, `hinF` the degree-`21` term `A(d+1)²¹n_a`; the display constant is
+`√2 + γ²·(80000·K) + √2·A·202²¹·2`.  `K = 10` (`Section36.error_count_le`) and
+`A = 2γ² + γ + 64γ⁷` (`hinF_of_rounds`) is the paper's own account. -/
+theorem display_of_strategy_of_calls_poly_coef (P : Finset V) (E₀ : Finset E) (S : Strategy G)
+    (hS : Strategy.Wf S)
+    {γ ε A K : ℝ} (hγ : 0 < γ) (hε : 0 < ε) (hγε : 16 ≤ ε * γ) (hA : 0 ≤ A) (hK : 0 ≤ K)
+    (hnm : ((S P E₀).2.P.card : ℝ) ≤ 2 * ((S P E₀).2.E₀.card : ℝ))
+    (errF inF : Inst V E → ℕ)
+    (herror : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (errF a : ℝ) ≤ K * ((γ * ((d : ℝ) + 1) ^ 3) ^ 2 *
+          Real.sqrt ((a.2.card : ℝ) * (a.1.card : ℝ))) +
+        4 * (a.2.card : ℝ) / (γ * ((d : ℝ) + 1) ^ 3))
+    (hinF : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (inF a : ℝ) ≤ (errF a : ℝ) + A * ((d : ℝ) + 1) ^ 21 * (a.1.card : ℝ))
+    (hUinst : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      ((S a.1 a.2).2.U).card ≤ errF a)
+    (hSEinst : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (∑ i, ((S a.1 a.2).2.kidE i).card) ≤ inF a) :
+    ((S P E₀).2.F.card : ℝ) + (((S P E₀).2.U).card : ℝ) +
+        ((∑ i, ((S P E₀).2.kidE i).card : ℕ) : ℝ) ≤
+      ε * ((S P E₀).2.E₀.card : ℝ) +
+        (Real.sqrt 2 + γ ^ 2 * (80000 * K) +
+            Real.sqrt 2 * (A * ((202 : ℝ) ^ 21 * 2))) *
+          Real.sqrt (((S P E₀).2.E₀.card : ℝ) * ((S P E₀).2.P.card : ℝ)) := by
+  have hroot : (P, E₀) ∈ (Level.chain P E₀ S hS 0).insts := by
+    simp [Level.chain, Level.root]
+  refine display_of_callout_poly_coef (S P E₀).2 hγ hε hγε hA hK hnm
+    (L := Level.chain P E₀ S hS) (LevelChain.chain_step P E₀ S hS)
+    (by simp [LevelChain.chain_verts, (hS P E₀).1])
+    (by simp [LevelChain.chain_edges, (hS P E₀).2])
+    (errL := fun d => ∑ a ∈ (Level.chain P E₀ S hS d).insts, errF a)
+    (inL := fun d => ∑ a ∈ (Level.chain P E₀ S hS d).insts, inF a)
+    (fun d hd => by
+      rw [Nat.cast_sum]
+      exact Level.errors_le_coef hK (by positivity) _
+        errF (fun a ha => herror d (Nat.lt_succ_iff.mp (Finset.mem_range.mp hd)) a ha))
+    (fun d hd => by
+      rw [Nat.cast_sum, Nat.cast_sum]
+      exact Level.inputs_le_coef _ errF inF
+        (fun a ha => hinF d (Nat.lt_succ_iff.mp (Finset.mem_range.mp hd)) a ha))
+    ?_ ?_
+  · have hU0 : ((S P E₀).2.U).card ≤ errF (P, E₀) :=
+      hUinst 0 (Nat.zero_le _) (P, E₀) hroot
+    have h0 : (∑ a ∈ (Level.chain P E₀ S hS 0).insts, errF a) = errF (P, E₀) := by
+      simp [Level.chain, Level.root]
+    have hle := Finset.single_le_sum
+      (f := fun d => ∑ a ∈ (Level.chain P E₀ S hS d).insts, errF a)
+      (fun i _ => Nat.zero_le _) (Finset.mem_range.mpr (Nat.succ_pos E₀.card))
+    calc ((S P E₀).2.U).card ≤ errF (P, E₀) := hU0
+      _ = ∑ a ∈ (Level.chain P E₀ S hS 0).insts, errF a := h0.symm
+      _ ≤ ∑ d ∈ Finset.range (E₀.card + 1),
+            ∑ a ∈ (Level.chain P E₀ S hS d).insts, errF a := hle
+  · have hSE0 : (∑ i, ((S P E₀).2.kidE i).card) ≤ inF (P, E₀) :=
+      hSEinst 0 (Nat.zero_le _) (P, E₀) hroot
+    have h0 : (∑ a ∈ (Level.chain P E₀ S hS 0).insts, inF a) = inF (P, E₀) := by
+      simp [Level.chain, Level.root]
+    have hle := Finset.single_le_sum
+      (f := fun d => ∑ a ∈ (Level.chain P E₀ S hS d).insts, inF a)
+      (fun i _ => Nat.zero_le _) (Finset.mem_range.mpr (Nat.succ_pos E₀.card))
+    calc (∑ i, ((S P E₀).2.kidE i).card) ≤ inF (P, E₀) := hSE0
+      _ = ∑ a ∈ (Level.chain P E₀ S hS 0).insts, inF a := h0.symm
+      _ ≤ ∑ d ∈ Finset.range (E₀.card + 1),
+            ∑ a ∈ (Level.chain P E₀ S hS d).insts, inF a := hle
+
+/-- **The paper's literal per-call input bound is `hinF` of the `poly` account.**  If every instance
+of every level has exact-MSF input at most `errF a + 2t²(n_a−1) + t(n_a−1+r²n_a)` with
+`t = γ(d+1)³`, `r = 8t³` — the §3.6 count of p. 24 — then it satisfies
+`hrest_of_instances_poly`'s premise with the coefficient `A = 2γ² + γ + 64γ⁷`
+(`Section36.msf_input_le_poly`). -/
+theorem hinF_of_rounds {γ : ℝ} (hγ1 : 1 ≤ γ) {D : ℕ} {L : ℕ → Level V E}
+    {errF inF : Inst V E → ℕ}
+    (hrounds : ∀ d ∈ Finset.range D, ∀ a ∈ (L d).insts, (inF a : ℝ) ≤ (errF a : ℝ) +
+      2 * (γ * ((d : ℝ) + 1) ^ 3) ^ 2 * ((a.1.card : ℝ) - 1) +
+        (γ * ((d : ℝ) + 1) ^ 3) *
+          ((a.1.card : ℝ) - 1 + (8 * (γ * ((d : ℝ) + 1) ^ 3) ^ 3) ^ 2 * (a.1.card : ℝ))) :
+    ∀ d ∈ Finset.range D, ∀ a ∈ (L d).insts, (inF a : ℝ) ≤
+      (errF a : ℝ) + (2 * γ ^ 2 + γ + 64 * γ ^ 7) * ((d : ℝ) + 1) ^ 21 * (a.1.card : ℝ) := by
+  intro d hd a ha
+  exact msf_input_le_poly (n := a.1.card) (d := d) (γ := γ) (rej := (errF a : ℝ))
+    (t := γ * ((d : ℝ) + 1) ^ 3) (r := 8 * (γ * ((d : ℝ) + 1) ^ 3) ^ 3) (inp := (inF a : ℝ))
+    hγ1 rfl rfl (hrounds d hd a ha)
+
+/-- **The root's display from the paper's own per-call count.**  Identical to
+`display_of_strategy_of_calls_poly`, but the input premise is the §3.6 count of p. 24
+`errF a + 2t²(n_a−1) + t(n_a−1+r²n_a)` rather than the abstract `A(d+1)²¹n`; the bridge is
+`hinF_of_rounds`, and the display constant is `√2 + γ²·80000 + √2·(2γ²+γ+64γ⁷)·202²¹·2`. -/
+theorem display_of_strategy_of_calls_paper (P : Finset V) (E₀ : Finset E) (S : Strategy G)
+    (hS : Strategy.Wf S)
+    {γ ε : ℝ} (hγ1 : 1 ≤ γ) (hε : 0 < ε) (hγε : 16 ≤ ε * γ)
+    (hnm : ((S P E₀).2.P.card : ℝ) ≤ 2 * ((S P E₀).2.E₀.card : ℝ))
+    (errF inF : Inst V E → ℕ)
+    (herror : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (errF a : ℝ) ≤ (γ * ((d : ℝ) + 1) ^ 3) ^ 2 *
+          Real.sqrt ((a.2.card : ℝ) * (a.1.card : ℝ)) +
+        4 * (a.2.card : ℝ) / (γ * ((d : ℝ) + 1) ^ 3))
+    (hrounds : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (inF a : ℝ) ≤ (errF a : ℝ) +
+        2 * (γ * ((d : ℝ) + 1) ^ 3) ^ 2 * ((a.1.card : ℝ) - 1) +
+          (γ * ((d : ℝ) + 1) ^ 3) *
+            ((a.1.card : ℝ) - 1 + (8 * (γ * ((d : ℝ) + 1) ^ 3) ^ 3) ^ 2 * (a.1.card : ℝ)))
+    (hUinst : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      ((S a.1 a.2).2.U).card ≤ errF a)
+    (hSEinst : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (∑ i, ((S a.1 a.2).2.kidE i).card) ≤ inF a) :
+    ((S P E₀).2.F.card : ℝ) + (((S P E₀).2.U).card : ℝ) +
+        ((∑ i, ((S P E₀).2.kidE i).card : ℕ) : ℝ) ≤
+      ε * ((S P E₀).2.E₀.card : ℝ) +
+        (Real.sqrt 2 + γ ^ 2 * 80000 +
+            Real.sqrt 2 * ((2 * γ ^ 2 + γ + 64 * γ ^ 7) * ((202 : ℝ) ^ 21 * 2))) *
+          Real.sqrt (((S P E₀).2.E₀.card : ℝ) * ((S P E₀).2.P.card : ℝ)) :=
+  display_of_strategy_of_calls_poly P E₀ S hS (by linarith) hε hγε
+    (by have h : (0 : ℝ) ≤ γ := by linarith
+        have h2 : (0 : ℝ) ≤ γ ^ 2 := pow_nonneg h 2
+        have h7 : (0 : ℝ) ≤ γ ^ 7 := pow_nonneg h 7
+        linarith)
+    hnm errF inF herror
+    (fun d hd a ha => hinF_of_rounds hγ1 (D := E₀.card + 1) (L := Level.chain P E₀ S hS)
+      (fun d' hd' a' ha' => hrounds d' (Nat.lt_succ_iff.mp (Finset.mem_range.mp hd')) a' ha')
+      d (Finset.mem_range.mpr (Nat.lt_succ_of_le hd)) a ha)
+    hUinst hSEinst
+
+set_option maxHeartbeats 1000000 in
+/-- **The root's display with the paper's own §3.6 estimates as the only numeric premises.**
+Per instance of every level the caller supplies exactly the two quantitative outputs of §3.6:
+
+* the **error count** `errF a ≤ 10·t_d²√(m_an_a) + 4m_a/t_d` — the paper's
+  `O(t²_c√(m_cn_c)) + 4m_c/t_c` with the hidden constant made explicit
+  (`Section36.error_count_le`: `lost + err2 ≤ 10·t²√(mn) + 4m/t` from Lemmas 3.10/3.11 and §3.5);
+* the **input count** `inF a ≤ errF a + 2t_d²(n_a−1) + t_d(n_a−1+r_d²n_a)` — the paper's p. 24 line
+  (`Section36.msf_input_count`, bridged to `A(d+1)²¹n_a` by `hinF_of_rounds`, `A = 2γ²+γ+64γ⁷`);
+
+plus the two per-call accounts `|U_a| ≤ errF a`, `Σᵢ|kidE_a i| ≤ inF a`.  The display then holds with
+`C_ε = √2 + γ²·800000 + √2·(2γ²+γ+64γ⁷)·202²¹·2`.  Everything else — the level geometry, the
+geometric sums, `n ≤ 2m` absorption, the root's single-instance discharge — is machine-derived. -/
+theorem display_of_strategy_of_calls_count (P : Finset V) (E₀ : Finset E) (S : Strategy G)
+    (hS : Strategy.Wf S)
+    {γ ε : ℝ} (hγ1 : 1 ≤ γ) (hε : 0 < ε) (hγε : 16 ≤ ε * γ)
+    (hnm : ((S P E₀).2.P.card : ℝ) ≤ 2 * ((S P E₀).2.E₀.card : ℝ))
+    (errF inF : Inst V E → ℕ)
+    (herror : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (errF a : ℝ) ≤ 10 * ((γ * ((d : ℝ) + 1) ^ 3) ^ 2 *
+          Real.sqrt ((a.2.card : ℝ) * (a.1.card : ℝ))) +
+        4 * (a.2.card : ℝ) / (γ * ((d : ℝ) + 1) ^ 3))
+    (hrounds : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (inF a : ℝ) ≤ (errF a : ℝ) +
+        2 * (γ * ((d : ℝ) + 1) ^ 3) ^ 2 * ((a.1.card : ℝ) - 1) +
+          (γ * ((d : ℝ) + 1) ^ 3) *
+            ((a.1.card : ℝ) - 1 + (8 * (γ * ((d : ℝ) + 1) ^ 3) ^ 3) ^ 2 * (a.1.card : ℝ)))
+    (hUinst : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      ((S a.1 a.2).2.U).card ≤ errF a)
+    (hSEinst : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (∑ i, ((S a.1 a.2).2.kidE i).card) ≤ inF a) :
+    ((S P E₀).2.F.card : ℝ) + (((S P E₀).2.U).card : ℝ) +
+        ((∑ i, ((S P E₀).2.kidE i).card : ℕ) : ℝ) ≤
+      ε * ((S P E₀).2.E₀.card : ℝ) +
+        (Real.sqrt 2 + γ ^ 2 * 800000 +
+            Real.sqrt 2 * ((2 * γ ^ 2 + γ + 64 * γ ^ 7) * ((202 : ℝ) ^ 21 * 2))) *
+          Real.sqrt (((S P E₀).2.E₀.card : ℝ) * ((S P E₀).2.P.card : ℝ)) := by
+  have hγ0 : (0 : ℝ) < γ := by linarith
+  have hA : (0 : ℝ) ≤ 2 * γ ^ 2 + γ + 64 * γ ^ 7 := by
+    have h : (0 : ℝ) ≤ γ := le_of_lt hγ0
+    have h2 : (0 : ℝ) ≤ γ ^ 2 := pow_nonneg h 2
+    have h7 : (0 : ℝ) ≤ γ ^ 7 := pow_nonneg h 7
+    linarith
+  have key := display_of_strategy_of_calls_poly_coef P E₀ S hS
+    (γ := γ) (ε := ε) (A := 2 * γ ^ 2 + γ + 64 * γ ^ 7) (K := 10)
+    hγ0 hε hγε hA (by norm_num) hnm errF inF herror
+    (fun d hd a ha => hinF_of_rounds hγ1 (D := E₀.card + 1) (L := Level.chain P E₀ S hS)
+      (fun d' hd' a' ha' => hrounds d' (Nat.lt_succ_iff.mp (Finset.mem_range.mp hd')) a' ha')
+      d (Finset.mem_range.mpr (Nat.lt_succ_of_le hd)) a ha)
+    hUinst hSEinst
+  rw [show γ ^ 2 * (80000 * (10 : ℝ)) = γ ^ 2 * 800000 by norm_num] at key
+  simpa using key
+
+/-- **The display from the two per-instance counts.**  Taking `errF` to be the unsupported-edge
+count and `inF` the total child input reduces `display_of_strategy_of_calls_count`'s four premises
+to two: the per-instance error bound `|U(F)| ≤ 10·t²√(mn) + 4m/t` (§3.5) and the per-instance input
+account `Σ|Eᵢ| ≤ |U(F)| + 2t²(n−1) + t(n−1+r²n)` (§3.6).  These are exactly the two quantitative
+outputs one call makes in the paper. -/
+theorem display_of_strategy_of_counts (P : Finset V) (E₀ : Finset E) (S : Strategy G)
+    (hS : Strategy.Wf S)
+    {γ ε : ℝ} (hγ1 : 1 ≤ γ) (hε : 0 < ε) (hγε : 16 ≤ ε * γ)
+    (hnm : ((S P E₀).2.P.card : ℝ) ≤ 2 * ((S P E₀).2.E₀.card : ℝ))
+    (herrU : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      (((S a.1 a.2).2.U).card : ℝ) ≤
+        10 * ((γ * ((d : ℝ) + 1) ^ 3) ^ 2 * Real.sqrt ((a.2.card : ℝ) * (a.1.card : ℝ))) +
+          4 * (a.2.card : ℝ) / (γ * ((d : ℝ) + 1) ^ 3))
+    (hrounds : ∀ d, d ≤ E₀.card → ∀ a ∈ (Level.chain P E₀ S hS d).insts,
+      ((∑ i, ((S a.1 a.2).2.kidE i).card : ℕ) : ℝ) ≤
+        (((S a.1 a.2).2.U).card : ℝ) +
+          2 * (γ * ((d : ℝ) + 1) ^ 3) ^ 2 * ((a.1.card : ℝ) - 1) +
+            (γ * ((d : ℝ) + 1) ^ 3) *
+              ((a.1.card : ℝ) - 1 + (8 * (γ * ((d : ℝ) + 1) ^ 3) ^ 3) ^ 2 * (a.1.card : ℝ))) :
+    ((S P E₀).2.F.card : ℝ) + (((S P E₀).2.U).card : ℝ) +
+        ((∑ i, ((S P E₀).2.kidE i).card : ℕ) : ℝ) ≤
+      ε * ((S P E₀).2.E₀.card : ℝ) +
+        (Real.sqrt 2 + γ ^ 2 * 800000 +
+            Real.sqrt 2 * ((2 * γ ^ 2 + γ + 64 * γ ^ 7) * ((202 : ℝ) ^ 21 * 2))) *
+          Real.sqrt (((S P E₀).2.E₀.card : ℝ) * ((S P E₀).2.P.card : ℝ)) :=
+  display_of_strategy_of_calls_count P E₀ S hS hγ1 hε hγε hnm
+    (fun a => ((S a.1 a.2).2.U).card)
+    (fun a => ∑ i, ((S a.1 a.2).2.kidE i).card)
+    herrU hrounds (fun _ _ _ _ => le_refl _) (fun _ _ _ _ => le_refl _)
+
 /-! ## 8. Loops: what the recursion's termination really assumes -/
 
 /-- A loop is supported by *every* edge set: its two endpoints are the same vertex, joined by the
@@ -1475,22 +2094,26 @@ theorem unsupp_empty_of_loopfree (hloop : ∀ e : E, G.src e ≠ G.dst e) :
 
 namespace Strategy
 
-/-- **A loop makes strict decrease impossible.**  On the instance `{e}` a loop can be in no forest
-(`IsForest.src_ne_dst`), is in no `U(F)` (`supported_of_loop`), so `hcover` forces it into some child;
-that child's input is then the whole instance and `CallOut.kidE_card_lt` cannot apply.  The paper's
-MST setting has no loops; this theorem says the hypothesis is not a convenience but a necessity for
-the recursion account as stated. -/
-theorem not_strict_of_loop (e₀ : E) (hloop : G.src e₀ = G.dst e₀) (S : Strategy G) (hS : Wf S) :
+/-- **In a three-bucket strategy a loop makes strict decrease impossible.**  If nothing is ever
+discarded (`drop = ∅` at every instance), then on the instance `{e}` a loop can be in no forest
+(`IsForest.src_ne_dst`), is in no `U(F)` (`supported_of_loop`), so the cover forces it into some
+child; that child's input is then the whole instance and `CallOut.kidE_card_lt` cannot apply.
+
+With the paper's fourth bucket this obstruction disappears — a loop is supported by every forest, so
+it can simply be discarded — which is the modelling difference this theorem isolates. -/
+theorem not_strict_of_loop (e₀ : E) (hloop : G.src e₀ = G.dst e₀) (S : Strategy G) (hS : Wf S)
+    (hnd : ∀ (P : Finset V) (E₀ : Finset E), (S P E₀).2.drop = ∅) :
     ¬ Strategy.Strict S := by
   classical
   intro hstr
   have hne : ({e₀} : Finset E).Nonempty := ⟨e₀, Finset.mem_singleton_self e₀⟩
   obtain ⟨i, hi⟩ : ∃ i, e₀ ∈ (S (∅ : Finset V) {e₀}).2.kidE i := by
     rcases (S (∅ : Finset V) {e₀}).2.hcover e₀ ((hS ∅ {e₀}).2.symm ▸ Finset.mem_singleton_self e₀) with
-      heF | heU | ⟨i, hi⟩
+      heF | heU | heD | ⟨i, hi⟩
     · exact absurd hloop ((S (∅ : Finset V) {e₀}).2.hforest.src_ne_dst e₀ heF)
     · exact absurd (supported_of_loop (F := (S (∅ : Finset V) {e₀}).2.F) hloop)
         (mem_unsupp.mp heU)
+    · exact absurd heD (by rw [hnd ∅ {e₀}]; simp)
     · exact ⟨i, hi⟩
   have hcard : ((S (∅ : Finset V) {e₀}).2.kidE i).card = 1 := by
     have hsub : (S (∅ : Finset V) {e₀}).2.kidE i ⊆ ({e₀} : Finset E) :=
@@ -1509,14 +2132,13 @@ theorem not_strict_of_loop (e₀ : E) (hloop : G.src e₀ = G.dst e₀) (S : Str
 kept (`cls = none`): with no loops every edge lies in `U(∅)`, so the single child receives nothing,
 the dropped edge is any edge of a nonempty instance, and the empty instance has no children at all.
 This is the degenerate strategy — it recurses in name only — but it shows that `Wf`/`Strict`/`Leaf`
-are consistent, and `not_strict_of_loop` shows that loop-freeness is exactly what makes them so. -/
-noncomputable def emptyClassCall (hloop : ∀ e : E, G.src e ≠ G.dst e)
+are consistent. -/
+noncomputable def emptyClassCall (_hloop : ∀ e : E, G.src e ≠ G.dst e)
     (P : Finset V) (E₀ : Finset E) (_h : E₀.Nonempty) :
     Sigma fun N : ℕ => CallOut G (Fin N) :=
   ⟨1, CallOut.ofClass P E₀ ∅ ∅ (fun _ => none)
       (Finset.empty_subset E₀) IsForest.empty (Nat.zero_le _)
       (Finset.empty_subset P) (by simp)
-      (fun _e _ hcl => Or.inr (by simp [unsupp_empty_of_loopfree hloop]))
       (fun _e _ i hcl => absurd hcl (by simp))⟩
 
 theorem exists_strict_of_loopfree (hloop : ∀ e : E, G.src e ≠ G.dst e) :
